@@ -100,7 +100,6 @@ private theorem avoidTwo (f : Fin 3 → ℕ) (q s n : ℕ)
   have h2 := h 2
   grind
 
-attribute [irreducible] base baseRow lifted
 private theorem excludeFactor {n p q : ℕ} (hp : p ≤ n) (hq : q.Prime)
     (hne : n % q ≠ p % q) : (n-p).Coprime q :=
   (hq.coprime_iff_not_dvd.mpr (fun h => hne ((Nat.modEq_iff_dvd' hp).mpr h).symm)).symm
@@ -110,8 +109,8 @@ theorem PEqualNP.Outside.L_goldbach_finite_wheel_rough_twentythree :
     ∀ n : ℕ, 210235 ≤ n → Even n → ∃ p : ℕ, Nat.Prime p ∧ p ≤ 210233 ∧ 2 ≤ n-p ∧ Nat.Coprime (n-p) 9699690 := by
   intro n hn hev
   obtain ⟨k,hk⟩ := hev
-  let a : Fin 105 := ⟨(n%210)/2, by omega⟩
-  have ha : 2*a.val = n%210 := by dsimp [a]; omega
+  let a : Fin 105 := ⟨(n % 210)/2, by omega⟩
+  have ha : 2*a.val = n % 210 := by dsimp [a]; omega
   obtain ⟨hbase,h11,h13⟩ := baseCertificate a
   obtain ⟨i,hi11,hi13⟩ := avoidTwo _ _ _ n h11 h13
   obtain ⟨hr,h2,h3,h5,h7⟩ := hbase i
