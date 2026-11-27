@@ -627,60 +627,39 @@ function agentName(name) {
   return Object.hasOwn(harnessLabels, name) ? harnessLabels[name] : name;
 }
 
-const agentBrandRules = [
-  [/(?:^|[ /:_-])(?:codex)(?=$|[ /:_.0-9-])/, 22],
-  [/(?:^|[ /:_-])(?:claude-code)(?=$|[ /:_.0-9-])/, 23],
-  [/(?:^|[ /:_-])(?:gemini-cli)(?=$|[ /:_.0-9-])/, 25],
-  [/(?:^|[ /:_-])(?:cursor)(?=$|[ /:_.0-9-])/, 24],
-  [/(?:^|[ /:_-])(?:opencode)(?=$|[ /:_.0-9-])/, 26],
-  [/(?:^|[ /:_-])(?:openai|gpt|chatgpt|o[134](?:-|$))(?=$|[ /:_.0-9-])/, 0],
-  [/(?:^|[ /:_-])(?:anthropic|claude)(?=$|[ /:_.0-9-])/, 1],
-  [/(?:^|[ /:_-])(?:gemini)(?=$|[ /:_.0-9-])/, 2],
-  [/(?:^|[ /:_-])(?:deepseek)(?=$|[ /:_.0-9-])/, 3],
-  [/(?:^|[ /:_-])(?:qwen|qwq|qvq|tongyi)(?=$|[ /:_.0-9-])/, 4],
-  [/(?:^|[ /:_-])(?:xai|x-ai|grok)(?=$|[ /:_.0-9-])/, 5],
-  [/(?:^|[ /:_-])(?:meta|llama)(?=$|[ /:_.0-9-])/, 6],
-  [/(?:^|[ /:_-])(?:mistral|mixtral|codestral|devstral|magistral)(?=$|[ /:_.0-9-])/, 7],
-  [/(?:^|[ /:_-])(?:kimi)(?=$|[ /:_.0-9-])/, 8],
-  [/(?:^|[ /:_-])(?:moonshot)(?=$|[ /:_.0-9-])/, 33],
-  [/(?:^|[ /:_-])(?:zhipu|zai|z-ai|glm|chatglm)(?=$|[ /:_.0-9-])/, 9],
-  [/(?:^|[ /:_-])(?:doubao|seed|bytedance)(?=$|[ /:_.0-9-])/, 10],
-  [/(?:^|[ /:_-])(?:baidu|ernie)(?=$|[ /:_.0-9-])/, 11],
-  [/(?:^|[ /:_-])(?:minimax)(?=$|[ /:_.0-9-])/, 12],
-  [/(?:^|[ /:_-])(?:yi(?:-|$)|01-ai)(?=$|[ /:_.0-9-])/, 13],
-  [/(?:^|[ /:_-])(?:cohere|command)(?=$|[ /:_.0-9-])/, 14],
-  [/(?:^|[ /:_-])(?:ai21|jamba)(?=$|[ /:_.0-9-])/, 15],
-  [/(?:^|[ /:_-])(?:nvidia|nemotron)(?=$|[ /:_.0-9-])/, 16],
-  [/(?:^|[ /:_-])(?:microsoft|phi)(?=$|[ /:_.0-9-])/, 17],
-  [/(?:^|[ /:_-])(?:hunyuan)(?=$|[ /:_.0-9-])/, 18],
-  [/(?:^|[ /:_-])(?:stepfun|step(?:-|$))(?=$|[ /:_.0-9-])/, 19],
-  [/(?:^|[ /:_-])(?:gemma)(?=$|[ /:_.0-9-])/, 20],
-  [/(?:^|[ /:_-])(?:google|palm)(?=$|[ /:_.0-9-])/, 21],
-  [/(?:^|[ /:_-])(?:perplexity|sonar)(?=$|[ /:_.0-9-])/, 27],
-  [/(?:^|[ /:_-])(?:alibaba)(?=$|[ /:_.0-9-])/, 28],
-  [/(?:^|[ /:_-])(?:tencent)(?=$|[ /:_.0-9-])/, 29],
-  [/(?:^|[ /:_-])(?:ibm|granite)(?=$|[ /:_.0-9-])/, 30],
-  [/(?:^|[ /:_-])(?:huggingface|smollm)(?=$|[ /:_.0-9-])/, 31],
-];
+const harnessBrandIcons = {
+  'codex': 22,
+  'claude-code': 23,
+  'cursor': 24,
+  'gemini-cli': 25,
+  'opencode': 26,
+};
 
-function agentBrandIcon(name) {
-  const match = agentBrandRules.find(([pattern]) => pattern.test(name.toLowerCase()));
-  const icon = element('span', match ? '' : name.slice(0, 1).toUpperCase(), 'agent-brand-icon');
+function agentBrandIcon(entry, kind = 'models') {
+  const name = typeof entry === 'string' ? entry : (entry?.name || '');
+  let slot = null;
+  if (entry && typeof entry === 'object' && Number.isInteger(entry.icon)) {
+    slot = entry.icon;
+  } else if (kind === 'harnesses' && Object.hasOwn(harnessBrandIcons, name)) {
+    slot = harnessBrandIcons[name];
+  }
+  const icon = element('span', slot !== null ? '' : name.slice(0, 1).toUpperCase(), 'agent-brand-icon');
   icon.setAttribute('aria-hidden', 'true');
-  if (match) {
+  if (slot !== null) {
     icon.classList.add('has-brand');
-    icon.style.backgroundPosition = '-' + (match[1] * 32) + 'px 0';
+    icon.style.backgroundPosition = '-' + (slot * 32) + 'px 0';
   }
   return icon;
 }
 
-function renderAgentRankingRow(entry, index, isProvider = false) {
+function renderAgentRankingRow(entry, index, kind = 'models') {
+  const isProvider = kind === 'providers' || kind === true;
   const item = element('li', undefined, 'ranking-row agent-ranking-row');
   const labelText = isProvider && entry.name === 'unknown'
     ? (lang === 'zh' ? '未识别厂商' : 'Unidentified provider')
     : agentName(entry.name);
   const name = element('div', undefined, 'ranking-name agent-brand-name');
-  name.append(agentBrandIcon(entry.name), element('strong', labelText, 'agent-brand-label'));
+  name.append(agentBrandIcon(entry, kind), element('strong', labelText, 'agent-brand-label'));
   if (isProvider && Array.isArray(entry.models) && entry.models.length) {
     const showLabel = lang === 'zh' ? '查看旗下模型' : 'Show models';
     const hideLabel = lang === 'zh' ? '收起旗下模型' : 'Hide models';
@@ -692,7 +671,7 @@ function renderAgentRankingRow(entry, index, isProvider = false) {
       const expanded = toggle.getAttribute('aria-expanded') === 'true';
       if (!subList) {
         subList = element('ol', undefined, 'ranking-list provider-models-list');
-        subList.append(...entry.models.map((m, i) => renderAgentRankingRow(m, i, false)));
+        subList.append(...entry.models.map((m, i) => renderAgentRankingRow(m, i, 'models')));
         item.append(subList);
       }
       subList.hidden = expanded;
@@ -852,8 +831,7 @@ function renderAgentColumns(container) {
   const empty = agentRankingsData
     ? (lang === 'zh' ? '暂无通过验证的记录。' : 'No verified contributions yet.')
     : strings.rankingsUnavailable;
-  const isProvider = agentDimension === 'providers';
-  mountProgressiveRankings(list, agentDimension, (entry, index) => renderAgentRankingRow(entry, index, isProvider), empty);
+  mountProgressiveRankings(list, agentDimension, (entry, index) => renderAgentRankingRow(entry, index, agentDimension), empty);
 }
 
 function renderRankingMode() {

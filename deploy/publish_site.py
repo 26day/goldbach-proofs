@@ -20,6 +20,7 @@ MARKER = ".site-revision"
 HEALTH = ("https://www.goldbach.tech/health", "https://www.movan.tech/goldbach/health")
 RUNTIME = re.compile(
     r"(?:[a-z][a-z0-9-]*\.(?:html|js|css|png|svg)|join(?:-zh)?\.txt|china-apnic\.txt|"
+    r"model-aliases\.json|"
     r"(?:server|desk|presence|landau|github_identity|zhihu_oauth|sponsors)\.py)"
 )
 

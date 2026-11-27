@@ -1,12 +1,14 @@
 import hashlib
 import hmac
 import ipaddress
+import json
 import re
 import secrets
 import sqlite3
 import time
 from collections import Counter
 from contextlib import closing, contextmanager
+from pathlib import Path
 
 NO_RESEARCH_DEADLINE = 253402300799  # Keep the existing integer lease protocol.
 SUBMISSION_SECONDS = 12 * 60 * 60
@@ -289,6 +291,27 @@ HISTORICAL_HARNESSES = {
 }
 
 AGENT_LABEL = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9 ._:/+\-]{0,95}", re.ASCII)
+UUID_PREFIX = re.compile(
+    r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})/"
+)
+CHANNEL_SUFFIX = re.compile(
+    r":(?:free|beta|extended|thinking|nitro|floor|online|exacto|[0-9]+)$"
+)
+BEDROCK_REGION_PREFIX = re.compile(r"^(?:us|eu|ap|apac|global)\.")
+# Cloud hosts, routers, proxies and local runtimes — not model authors.
+GATEWAY_PREFIXES = frozenset({
+    "openrouter", "aws", "amazon-bedrock", "bedrock", "vertex", "vertex-ai", "vertex_ai",
+    "gcp", "azure", "azure-openai", "together", "togetherai", "together-ai",
+    "fireworks", "fireworks-ai", "siliconflow", "siliconcloud", "volcengine", "volces",
+    "ark", "bailian", "dashscope", "aliyun", "litellm", "ollama", "vllm", "sglang",
+    "lmstudio", "deepinfra", "novita", "groq", "cerebras", "sambanova", "chutes",
+    "parasail", "nebius", "hyperbolic", "cloudflare", "workers-ai", "replicate",
+    "lepton", "baseten", "modal", "anyscale", "github", "github-models", "copilot",
+    "poe", "api", "proxy", "gateway", "relay", "oneapi", "newapi",
+})
+# Model hubs that host both their own models and third-party open-weights models.
+HUB_PREFIXES = frozenset({"huggingface", "hugging-face"})
+
 # Only recognize this explicit family of aliases. Do not strip arbitrary model suffixes:
 # dates, preview names, fine-tunes and other providers may encode distinct models there.
 GPT_VARIANT = re.compile(
@@ -297,57 +320,554 @@ GPT_VARIANT = re.compile(
 )
 
 
+# Explicit, auditable alias mappings loaded from deploy/model-aliases.json (read-time
+# rankings only; stored submission provenance and verification records stay untouched).
+MODEL_ALIASES_FILE = Path(__file__).resolve().with_name("model-aliases.json")
+_DEFAULT_MODEL_ALIASES = {
+    "model_aliases": {
+        "big fat fish v4.1-flash": "deepseek-v4.1-flash",
+        "gpt-6 astra pro": "gpt-6-astra-pro",
+        "minimax m78": "minimax-m78",
+        "gemini-neon": "gemini-4-neon",
+        "gemini 4": "gemini-4",
+        "gemini-4-carbon-high": "gemini-4-carbon",
+        "gemini 4 hydrogen": "gemini-4-hydrogen",
+        "gemini-4-hydrogen-high": "gemini-4-hydrogen",
+        "k3.1-pro": "kimi-k3.1-pro",
+    },
+    "provider_aliases": {
+        "hy4std": "Tencent",
+        "hy4-flash-free": "Tencent",
+    },
+}
+
+
+def _load_model_aliases(path=MODEL_ALIASES_FILE):
+    raw = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else _DEFAULT_MODEL_ALIASES
+    model_aliases = {
+        " ".join(k.lower().split()): " ".join(v.lower().split())
+        for k, v in raw.get("model_aliases", {}).items()
+    }
+    provider_aliases = {
+        " ".join(k.lower().split()): v.strip()
+        for k, v in raw.get("provider_aliases", {}).items()
+    }
+    return model_aliases, provider_aliases
+
+
+MODEL_NAME_ALIASES, MODEL_EXACT_ALIASES = _load_model_aliases()
+
+
+def strip_uuid_prefix(label):
+    while True:
+        stripped = UUID_PREFIX.sub("", label, count=1)
+        if stripped == label or not stripped:
+            return label
+        label = stripped
+
+
 def model_ranking_name(value):
-    """Group known spelling/effort aliases without changing submitted provenance."""
-    label = " ".join(value.lower().split())
+    """Group known spelling/effort/nickname aliases and strip opaque UUID tenant prefixes."""
+    label = strip_uuid_prefix(" ".join(value.lower().split()))
+    if label in MODEL_NAME_ALIASES:
+        return MODEL_NAME_ALIASES[label]
     match = GPT_VARIANT.fullmatch(label)
     return f"gpt-{match[1]}-{match[2]}" if match else label
 
 
+# Single source of truth for model developers, prefix/family rules and brand icons.
 # Model authors and model-family labels, not API hosts or coding tools.
-# Reference: https://openrouter.ai/models and https://openrouter.ai/rankings/
+# Reference: https://openrouter.ai/models and https://models.dev/
+MODEL_REGISTRY = {
+    "OpenAI": {
+        "icon": 0,
+        "orgs": ("openai",),
+        "families": (r"gpt", r"chatgpt", r"o[134](?=$|[._:-]|-mini|-pro|-preview)"),
+    },
+    "Anthropic": {
+        "icon": 1,
+        "orgs": ("anthropic",),
+        "families": (r"claude",),
+    },
+    "Google": {
+        "icon": 21,
+        "orgs": ("google",),
+        "families": (r"gemini", r"gemma", r"palm"),
+        "family_icons": ((r"gemini", 2), (r"gemma", 20)),
+    },
+    "MiniMax": {
+        "icon": 12,
+        "orgs": ("minimax", "minimaxai"),
+        "families": (r"minimax", r"abab"),
+    },
+    "DeepSeek": {
+        "icon": 3,
+        "orgs": ("deepseek", "deepseek-ai"),
+        "families": (r"deepseek",),
+    },
+    "Alibaba": {
+        "icon": 28,
+        "orgs": ("alibaba", "qwen", "tongyi"),
+        "families": (r"qwen", r"qwq", r"qvq", r"tongyi"),
+        "family_icons": ((r"qwen|qwq|qvq|tongyi", 4),),
+    },
+    "Moonshot AI": {
+        "icon": 33,
+        "orgs": ("moonshot", "moonshotai"),
+        "families": (r"kimi", r"moonshot"),
+        "family_icons": ((r"kimi", 8),),
+    },
+    "Meta": {
+        "icon": 6,
+        "orgs": ("meta", "meta-llama"),
+        "families": (r"llama",),
+    },
+    "Mistral AI": {
+        "icon": 7,
+        "orgs": ("mistral", "mistralai"),
+        "families": (r"mistral", r"mixtral", r"codestral", r"devstral", r"magistral", r"ministral", r"pixtral", r"voxtral"),
+    },
+    "xAI": {
+        "icon": 5,
+        "orgs": ("xai", "x-ai"),
+        "families": (r"grok",),
+    },
+    "Z.ai": {
+        "icon": 9,
+        "orgs": ("zai", "z-ai", "zhipu", "zhipuai", "thudm"),
+        "families": (r"glm", r"chatglm"),
+    },
+    "ByteDance": {
+        "icon": 10,
+        "orgs": ("bytedance", "bytedance-seed"),
+        "families": (r"doubao", r"seed(?=[ -]?[0-9]|-oss|-coder|-pro|-thinking)"),
+    },
+    "Baidu": {
+        "icon": 11,
+        "orgs": ("baidu",),
+        "families": (r"ernie", r"wenxin"),
+    },
+    "Tencent": {
+        "icon": 29,
+        "orgs": ("tencent",),
+        "families": (r"hunyuan", r"hy(?=[0-9])"),
+        "family_icons": ((r"hunyuan|hy(?=[0-9])", 18),),
+    },
+    "StepFun": {
+        "icon": 19,
+        "orgs": ("stepfun", "step-fun"),
+        "families": (r"step(?=[ -]?[0-9])",),
+    },
+    "Microsoft": {
+        "icon": 17,
+        "orgs": ("microsoft",),
+        "families": (r"phi(?=$|[0-9 ._-])", r"mai(?=[ -]?[0-9])"),
+    },
+    "NVIDIA": {
+        "icon": 16,
+        "orgs": ("nvidia",),
+        "families": (r"nemotron",),
+    },
+    "Amazon": {
+        "icon": None,
+        "orgs": ("amazon",),
+        "families": (r"amazon-nova", r"nova(?=-?(?:micro|lite|pro|premier|sonic|reel|canvas|[0-9]))"),
+    },
+    "IBM": {
+        "icon": 30,
+        "orgs": ("ibm", "ibm-granite"),
+        "families": (r"granite",),
+    },
+    "Cohere": {
+        "icon": 14,
+        "orgs": ("cohere",),
+        "families": (r"command-r", r"command-a", r"aya-expanse"),
+    },
+    "AI21 Labs": {
+        "icon": 15,
+        "orgs": ("ai21", "ai21labs"),
+        "families": (r"jamba",),
+    },
+    "Perplexity": {
+        "icon": 27,
+        "orgs": ("perplexity",),
+        "families": (r"sonar",),
+    },
+    "01.AI": {
+        "icon": 13,
+        "orgs": ("01-ai", "01.ai"),
+        "families": (r"yi(?=-[0-9])",),
+    },
+    "Xiaomi": {
+        "icon": None,
+        "orgs": ("xiaomi",),
+        "families": (r"mimo",),
+    },
+    "InclusionAI": {
+        "icon": None,
+        "orgs": ("inclusionai", "inclusion-ai"),
+        "families": (r"ling(?=[ -]?[0-9])", r"ring(?=[ -]?[0-9])"),
+    },
+    "Meituan": {
+        "icon": None,
+        "orgs": ("meituan",),
+        "families": (r"longcat", r"long-cat"),
+    },
+    "Nex AGI": {
+        "icon": None,
+        "orgs": ("nex-agi", "nexagi"),
+        "families": (r"nex-n(?=[0-9])",),
+    },
+    "Allen Institute for AI": {
+        "icon": None,
+        "orgs": ("allenai", "ai2"),
+        "families": (r"olmo", r"molmo", r"tulu"),
+    },
+    "Nous Research": {
+        "icon": None,
+        "orgs": ("nousresearch", "nous-research"),
+        "families": (r"hermes(?=[ -]?[0-9])",),
+    },
+    "Hugging Face": {
+        "icon": 31,
+        "orgs": ("huggingface", "hugging-face", "huggingfaceh4"),
+        "families": (r"smollm",),
+    },
+    "Naver": {
+        "icon": None,
+        "orgs": ("naver",),
+        "families": (r"hyperclova",),
+    },
+    "LG AI Research": {
+        "icon": None,
+        "orgs": ("lgairesearch", "lg-ai-research"),
+        "families": (r"exaone",),
+    },
+    "NCSOFT": {
+        "icon": None,
+        "orgs": ("ncsoft",),
+        "families": (r"varco",),
+    },
+    "Writer": {
+        "icon": None,
+        "orgs": ("writer",),
+        "families": (r"palmyra",),
+    },
+}
+
+# Canonical model catalog snapshot for client discovery (`GET /api/models`,
+# `python tools/goldbach.py models`) and Tier-2 classification.
+# Never put raw aliases from deploy/model-aliases.json here.
+# Synced offline via `python tools/sync_models.py sync`.
+# BEGIN MODEL_CATALOG
+MODEL_CATALOG = {
+    "gpt-6.2-astra": "OpenAI",
+    "gpt-6.2-sol": "OpenAI",
+    "gpt-6.2-terra": "OpenAI",
+    "gpt-6.2-luna": "OpenAI",
+    "gpt-6.2": "OpenAI",
+    "gpt-6.1-sol": "OpenAI",
+    "gpt-6.1-terra": "OpenAI",
+    "gpt-6-astra-pro": "OpenAI",
+    "gpt-6-luna": "OpenAI",
+    "gpt-6": "OpenAI",
+    "gpt-5.6-sol": "OpenAI",
+    "gpt-5.4": "OpenAI",
+    "gpt-5.4-mini": "OpenAI",
+    "gpt-5.4-pro": "OpenAI",
+    "gpt-5.3-codex": "OpenAI",
+    "gpt-5.2": "OpenAI",
+    "gpt-5": "OpenAI",
+    "gpt-4.1": "OpenAI",
+    "gpt-4o": "OpenAI",
+    "o3": "OpenAI",
+    "o3-pro": "OpenAI",
+    "o4-mini": "OpenAI",
+    "claude-opus-5-5": "Anthropic",
+    "claude-fable-5-2": "Anthropic",
+    "claude-opus-4.6": "Anthropic",
+    "claude-opus-4.5": "Anthropic",
+    "claude-opus-4.1": "Anthropic",
+    "claude-opus-4": "Anthropic",
+    "claude-sonnet-4.6": "Anthropic",
+    "claude-sonnet-4.5": "Anthropic",
+    "claude-sonnet-4": "Anthropic",
+    "claude-haiku-4.5": "Anthropic",
+    "claude-3.7-sonnet": "Anthropic",
+    "gemini-4-neon": "Google",
+    "gemini-4-carbon": "Google",
+    "gemini-4-hydrogen": "Google",
+    "gemini-4": "Google",
+    "gemini-3.1-pro": "Google",
+    "gemini-3-pro": "Google",
+    "gemini-3-flash": "Google",
+    "gemini-2.5-pro": "Google",
+    "gemini-2.5-flash": "Google",
+    "gemma-3-27b-it": "Google",
+    "minimax-m78": "MiniMax",
+    "minimax-m3.1-flash": "MiniMax",
+    "minimax-m2.5": "MiniMax",
+    "minimax-m2.1": "MiniMax",
+    "minimax-m2": "MiniMax",
+    "minimax-m1": "MiniMax",
+    "deepseek-v4.1-flash": "DeepSeek",
+    "deepseek-v4-pro": "DeepSeek",
+    "deepseek-flash": "DeepSeek",
+    "deepseek-v4": "DeepSeek",
+    "deepseek-v3.2": "DeepSeek",
+    "deepseek-v3.1": "DeepSeek",
+    "deepseek-v3": "DeepSeek",
+    "deepseek-r1": "DeepSeek",
+    "qwen3.7-plus": "Alibaba",
+    "qwen3.5-plus": "Alibaba",
+    "qwen3-max": "Alibaba",
+    "qwen3-coder": "Alibaba",
+    "qwen3-235b-a22b": "Alibaba",
+    "qwq-32b": "Alibaba",
+    "kimi-k3.1-pro": "Moonshot AI",
+    "kimi-k3": "Moonshot AI",
+    "kimi-k2.5": "Moonshot AI",
+    "kimi-k2": "Moonshot AI",
+    "kimi-k2-thinking": "Moonshot AI",
+    "llama-4-maverick": "Meta",
+    "llama-4-scout": "Meta",
+    "llama-3.3-70b-instruct": "Meta",
+    "mistral-large-2512": "Mistral AI",
+    "devstral-medium": "Mistral AI",
+    "codestral-2508": "Mistral AI",
+    "magistral-medium": "Mistral AI",
+    "grok-4": "xAI",
+    "grok-3": "xAI",
+    "grok-code-fast-1": "xAI",
+    "glm-5.4": "Z.ai",
+    "glm-5": "Z.ai",
+    "glm-4.7": "Z.ai",
+    "glm-4.6": "Z.ai",
+    "glm-4.5": "Z.ai",
+    "doubao-seed-2.0-pro": "ByteDance",
+    "doubao-seed-1.6": "ByteDance",
+    "doubao-1.5-pro": "ByteDance",
+    "ernie-4.5-turbo": "Baidu",
+    "ernie-x1": "Baidu",
+    "hunyuan-t1": "Tencent",
+    "hunyuan-turbos": "Tencent",
+    "step-3.5-flash": "StepFun",
+    "step-3": "StepFun",
+    "phi-4": "Microsoft",
+    "phi-4-reasoning": "Microsoft",
+    "llama-3.3-nemotron-super-49b": "NVIDIA",
+    "amazon-nova-pro": "Amazon",
+    "amazon-nova-premier": "Amazon",
+    "granite-4.0-h-small": "IBM",
+    "command-a": "Cohere",
+    "jamba-1.6-large": "AI21 Labs",
+    "sonar-pro": "Perplexity",
+    "sonar-reasoning-pro": "Perplexity",
+    "yi-lightning": "01.AI",
+    "mimo-v2-flash": "Xiaomi",
+    "mimo-7b-rl": "Xiaomi",
+    "ling-1t": "InclusionAI",
+    "ring-1t": "InclusionAI",
+    "longcat-flash-chat": "Meituan",
+    "nex-n2.6": "Nex AGI",
+    "nex-n1": "Nex AGI",
+    "olmo-2-32b-instruct": "Allen Institute for AI",
+    "hermes-4-70b": "Nous Research",
+    "smollm3-3b": "Hugging Face",
+    "hyperclova-x-seed": "Naver",
+    "exaone-4.0-32b": "LG AI Research",
+    "varco-vision-2.0": "NCSOFT",
+    "palmyra-x5": "Writer",
+}
+# END MODEL_CATALOG
+
 MODEL_PROVIDERS = {
-    "OpenAI": r"openai|gpt|chatgpt|o[134](?:-mini|-pro)?",
-    "Anthropic": r"anthropic|claude",
-    "Google": r"google|gemini|gemma",
-    "MiniMax": r"minimax|minimaxai",
-    "DeepSeek": r"deepseek",
-    "Alibaba": r"alibaba|qwen|qwq|qvq",
-    "Moonshot AI": r"moonshot|moonshotai|kimi",
-    "Meta": r"meta|meta-llama|llama",
-    "Mistral AI": r"mistral|mistralai|mixtral|codestral|devstral|magistral",
-    "xAI": r"xai|x-ai|grok",
-    "Z.ai": r"zai|z-ai|zhipu|zhipuai|glm|chatglm",
-    "ByteDance": r"bytedance|bytedance-seed|doubao",
-    "Baidu": r"baidu|ernie",
-    "Tencent": r"tencent|hunyuan",
-    "StepFun": r"stepfun|step-fun|step(?=[ -]?[0-9])",
-    "Microsoft": r"microsoft|phi|mai",
-    "NVIDIA": r"nvidia|nemotron",
-    "Amazon": r"amazon|amazon-nova",
-    "IBM": r"ibm|ibm-granite|granite",
-    "Cohere": r"cohere|command-r|command-a",
-    "AI21 Labs": r"ai21|ai21labs|jamba",
-    "Perplexity": r"perplexity|sonar",
-    "01.AI": r"01-ai|01\.ai|yi(?=-[0-9])",
-    "Xiaomi": r"xiaomi|mimo",
-    "InclusionAI": r"inclusionai|inclusion-ai|ling(?=[ -]?[0-9])",
-    "Meituan": r"meituan|longcat|long-cat",
-    "Allen Institute for AI": r"allenai|ai2|olmo",
-    "Nous Research": r"nousresearch|nous-research|hermes(?=[ -]?[0-9])",
-    "Hugging Face": r"huggingface|hugging-face|smollm",
-    "Naver": r"naver|hyperclova",
-    "LG AI Research": r"lgairesearch|lg-ai-research|exaone",
-    "NCSOFT": r"ncsoft|varco",
-    "Writer": r"writer|palmyra",
+    provider: "|".join(dict.fromkeys((*spec["orgs"], *spec["families"])))
+    for provider, spec in MODEL_REGISTRY.items()
+}
+
+_ORG_TO_PROVIDER = {
+    org: provider
+    for provider, spec in MODEL_REGISTRY.items()
+    for org in spec["orgs"]
+}
+_FAMILY_RULES = tuple(
+    (
+        provider,
+        re.compile(rf"^(?:{'|'.join(spec['families'])})(?=$|[0-9 ./_:-])"),
+        re.compile(rf"^(?:{'|'.join(re.escape(org) for org in spec['orgs'])})(?=$|[0-9 ./_:-])"),
+    )
+    for provider, spec in MODEL_REGISTRY.items()
+)
+_FAMILY_ICON_RULES = {
+    provider: tuple(
+        (re.compile(rf"^(?:{pattern})(?=$|[0-9 ./_:-])"), icon)
+        for pattern, icon in spec.get("family_icons", ())
+    )
+    for provider, spec in MODEL_REGISTRY.items()
+    if spec.get("family_icons")
 }
 
 
-def model_provider(name):
-    for provider, aliases in MODEL_PROVIDERS.items():
-        if re.match(rf"^(?:{aliases})(?=$|[0-9 ./_:-])", name):
+def parse_model_id(name):
+    """Split a normalized model string into (org_prefix, leaf_model, stripped_path)."""
+    label = strip_uuid_prefix(" ".join(name.lower().split()))
+    segments = [segment.strip() for segment in label.split("/") if segment.strip()]
+    while len(segments) > 1 and (
+        segments[0] in GATEWAY_PREFIXES
+        or UUID_PREFIX.match(segments[0] + "/")
+    ):
+        segments.pop(0)
+    if not segments:
+        return None, "", ""
+    leaf = CHANNEL_SUFFIX.sub("", segments[-1])
+    org = segments[-2] if len(segments) >= 2 else None
+    # Handle AWS Bedrock dotted identifiers such as `us.anthropic.claude-3-7-sonnet-v1:0`.
+    dotted = BEDROCK_REGION_PREFIX.sub("", leaf)
+    if "." in dotted:
+        prefix, rest = dotted.split(".", 1)
+        if prefix in _ORG_TO_PROVIDER and rest:
+            org = prefix
+            leaf = rest
+    stripped = f"{org}/{leaf}" if org else leaf
+    return org, leaf, stripped
+
+
+def _match_family_or_org_prefix(leaf):
+    for provider, family_re, _ in _FAMILY_RULES:
+        if family_re.match(leaf):
             return provider
-    return "unknown"
+    for provider, _, org_re in _FAMILY_RULES:
+        if org_re.match(leaf):
+            return provider
+    return None
+
+
+def model_provider(name):
+    label = " ".join(name.lower().split())
+    if not label or label == "unknown":
+        return "unknown"
+    label = MODEL_NAME_ALIASES.get(label, label)
+    # Tier 1: Explicit auditable aliases (exact normalized string or stripped leaf).
+    if label in MODEL_EXACT_ALIASES:
+        return MODEL_EXACT_ALIASES[label]
+    org, leaf, stripped = parse_model_id(label)
+    if stripped in MODEL_EXACT_ALIASES:
+        return MODEL_EXACT_ALIASES[stripped]
+    if leaf in MODEL_EXACT_ALIASES:
+        return MODEL_EXACT_ALIASES[leaf]
+    # Tier 2: Static canonical model catalog.
+    if stripped in MODEL_CATALOG:
+        return MODEL_CATALOG[stripped]
+    if leaf in MODEL_CATALOG:
+        return MODEL_CATALOG[leaf]
+    # Tier 3: Structured org-prefix and model-family matching.
+    if org in HUB_PREFIXES:
+        return _match_family_or_org_prefix(leaf) or _ORG_TO_PROVIDER[org]
+    if org in _ORG_TO_PROVIDER:
+        return _ORG_TO_PROVIDER[org]
+    return _match_family_or_org_prefix(leaf) or "unknown"
+
+
+def provider_brand_icon(provider):
+    spec = MODEL_REGISTRY.get(provider)
+    return spec["icon"] if spec else None
+
+
+def model_brand_icon(name, provider=None):
+    canonical = model_ranking_name(name)
+    resolved = provider if provider is not None else model_provider(canonical)
+    if resolved == "unknown":
+        return None
+    _, leaf, _ = parse_model_id(canonical)
+    for pattern, icon in _FAMILY_ICON_RULES.get(resolved, ()):
+        if pattern.match(leaf):
+            return icon
+    return provider_brand_icon(resolved)
+
+
+def _is_clean_recommended_model(model_id):
+    """Exclude raw aliases, whitespace labels and channel/gateway strings from recommendations."""
+    if not model_id or " " in model_id or model_id in MODEL_NAME_ALIASES:
+        return False
+    if UUID_PREFIX.match(model_id) or CHANNEL_SUFFIX.search(model_id):
+        return False
+    segments = [part for part in model_id.split("/") if part]
+    if len(segments) > 1 and segments[0] in GATEWAY_PREFIXES:
+        return False
+    return True
+
+
+def model_catalog_payload(observed_models=(), query="", provider="", offset=0, limit=30):
+    """Build a bounded, paginated model discovery payload for GET /api/models."""
+    needle = " ".join(query.lower().split())
+    provider_filter = " ".join(provider.lower().split())
+    if provider_filter in _ORG_TO_PROVIDER:
+        provider_filter = _ORG_TO_PROVIDER[provider_filter].lower()
+    offset = max(0, int(offset))
+    limit = max(1, min(100, int(limit)))
+
+    def keep(model_id, prov):
+        if provider_filter and prov.lower() != provider_filter:
+            return False
+        if needle and needle not in model_id.lower() and needle not in prov.lower():
+            return False
+        return True
+
+    catalog = [
+        {"id": model_id, "provider": prov}
+        for model_id, prov in MODEL_CATALOG.items()
+        if _is_clean_recommended_model(model_id) and keep(model_id, prov)
+    ]
+    observed = [
+        {
+            "id": row["name"],
+            "provider": row["provider"],
+            "accepted": row["accepted"],
+            "points": row["points"],
+        }
+        for row in observed_models
+        if row.get("provider") and row["provider"] != "unknown"
+        and _is_clean_recommended_model(row["name"])
+        and keep(row["name"], row["provider"])
+    ]
+    payload = {
+        "models": catalog[offset : offset + limit],
+        "models_total": len(catalog),
+        "observed": observed[offset : offset + limit],
+        "observed_total": len(observed),
+        "offset": offset,
+        "limit": limit,
+        "has_more": (offset + limit) < max(len(catalog), len(observed)),
+    }
+    if offset == 0:
+        payload["providers"] = [
+            {
+                "name": name,
+                "orgs": list(spec["orgs"]),
+                **({"icon": spec["icon"]} if spec["icon"] is not None else {}),
+            }
+            for name, spec in MODEL_REGISTRY.items()
+            if (not provider_filter or name.lower() == provider_filter)
+            and (not needle or needle in name.lower() or any(needle in org for org in spec["orgs"]))
+        ]
+        payload["harnesses"] = list(HARNESS_NAMES)
+        payload["naming"] = {
+            "max_length": 96,
+            "examples": [
+                "gpt-6.2-sol", "claude-opus-5-5", "gemini-4-neon",
+                "deepseek-v4.1-flash", "glm-5.4", "minimax-m78",
+                "kimi-k2", "qwen3-max", "nex-n2.6",
+            ],
+            "avoid": [
+                "gateway or tenant prefixes (openrouter/, aws/, bedrock/, UUID/)",
+                "channel routing tags (:free, :online, :nitro)",
+                "reasoning effort suffixes (high, xhigh, medium)",
+                "harness names (codex, cursor, claude-code)",
+                "informal nicknames",
+            ],
+        }
+    return payload
 
 
 def agent_metadata(value):
@@ -362,6 +882,8 @@ def agent_metadata(value):
         if not isinstance(label, str) or not AGENT_LABEL.fullmatch(label):
             raise ValueError("invalid_agent_metadata")
         result[key] = " ".join(label.lower().split())
+    if UUID_PREFIX.match(result["model"]):
+        raise ValueError("invalid_agent_metadata")
     if result["harness"] not in HARNESS_NAMES:
         raise ValueError("invalid_agent_metadata")
     return result
@@ -799,7 +1321,19 @@ class Desk:
         providers = {}
         for model in models:
             name = model_provider(model["name"])
-            entry = providers.setdefault(name, {"name": name, "accepted": 0, "points": 0, "models": []})
+            if name != "unknown":
+                model["provider"] = name
+                icon = model_brand_icon(model["name"], name)
+                if icon is not None:
+                    model["icon"] = icon
+            entry = providers.get(name)
+            if entry is None:
+                entry = {"name": name, "accepted": 0, "points": 0, "models": []}
+                if name != "unknown":
+                    p_icon = provider_brand_icon(name)
+                    if p_icon is not None:
+                        entry["icon"] = p_icon
+                providers[name] = entry
             entry["accepted"] += model["accepted"]
             entry["points"] += model["points"]
             entry["models"].append(model)
