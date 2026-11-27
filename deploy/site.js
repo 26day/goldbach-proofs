@@ -1327,7 +1327,7 @@ function initSponsorMarquee() {
   originals.forEach(prepCard);
 
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const BASE_SPEED = 24; // px/s gentle drift
+  const BASE_SPEED = 20; // px/s gentle drift
   let rafId = 0;
   let lastFrame = 0;
   let lastWidth = 0;
@@ -1611,6 +1611,9 @@ function initSponsorMarquee() {
   }
 }
 
+for (const img of document.querySelectorAll('.author-avatar img')) {
+  img.addEventListener('error', () => img.remove());
+}
 initSponsorMarquee();
 loadStatus();
 window.setInterval(loadStatus, 120000);

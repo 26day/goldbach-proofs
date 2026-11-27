@@ -117,6 +117,21 @@ ASSETS = {
     "/join-zh.txt": "text/plain",
 }
 
+def asset_version(name):
+    path = ROOT / name
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:8] if path.exists() else ""
+
+
+ASSET_VERSIONS = {name: asset_version(name) for name in ("site.css", "site.js")}
+
+
+def version_assets(page, prefix=""):
+    for name, version in ASSET_VERSIONS.items():
+        if version:
+            page = page.replace(f'"{prefix}{name}"', f'"{prefix}{name}?v={version}"', 1)
+    return page
+
+
 @lru_cache(maxsize=16)
 def compressed_asset(content):
     return gzip.compress(content, compresslevel=6, mtime=0)
@@ -190,6 +205,7 @@ def hero_community_card(lang, prefix):
     zh = lang == "zh"
     disc = discussion_copy(lang)
     core = core_team_copy(lang)
+    stats = f'<div class="desk-rail-stats">{presence_widget(lang, prefix, variant="footer")}</div>'
     items = []
     if disc:
         items.append(
@@ -212,8 +228,8 @@ def hero_community_card(lang, prefix):
         f'<div class="community-qr core-qr"><img loading="lazy" src="{prefix}core-team-signup.png" width="176" height="176" alt="{core["caption"]}"></div>'
         f'</div></details>'
     )
-    label = "社区交流与中心组报名" if zh else "Community discussion and core team signup"
-    return f'<aside class="hero-community desk-rail" aria-label="{label}">{"".join(items)}</aside>'
+    label = "研究台统计与社区交流" if zh else "Research desk stats and community"
+    return f'<aside class="hero-community desk-rail" aria-label="{label}">{stats}<div class="desk-rail-items">{"".join(items)}</div></aside>'
 
 
 def site_dock(lang, prefix, *, inline=False):
@@ -561,6 +577,7 @@ def problem_page(page, slug, lang):
               "You may import community lemmas listed in gap.imports and research methods online. "
               "Formalize the relevant steps in your assigned Lean file and cite your sources in the PR.")
     page = re.sub(r'(<p id="agent-prompt"[^>]*>).*?(</p>)', lambda m: m[1] + escape(prompt) + m[2], page)
+    page = re.sub(r'<a\b[^>]*\bdata-goldbach-only\b[^>]*>.*?</a>', "", page, flags=re.S)
     return page
 
 
@@ -1062,15 +1079,21 @@ class Handler(BaseHTTPRequestHandler):
         else:
             page = goldbach_roadmap_page(page, lang)
         prefix = "" if slug == "goldbach" else "../../"
+        page = version_assets(page, prefix)
         page = page.replace("<!-- account -->", ZHIHU.account_link(self.headers, lang), 1)
         page = page.replace("<!-- presence strip -->", presence_widget(lang, prefix, variant="inline"), 1)
         page = page.replace("<!-- hero community -->", hero_community_card(lang, prefix), 1)
-        hero = '<section class="hero" aria-labelledby="page-title">'
-        page = page.replace(hero, sponsors.wall(ZHIHU.db, lang, prefix) + hero, 1)
+        page = page.replace("<!-- hero colophon -->",
+                            sponsors.author_colophon(ZHIHU.db, lang, prefix, goldbach=(slug == "goldbach")), 1)
         if "<!-- site dock -->" in page:
             page = page.replace("<!-- site dock -->", site_dock(lang, prefix, inline=True), 1)
         else:
             page = page.replace("</main>", "</main>" + site_dock(lang, prefix), 1)
+        supporting = sponsors.wall(ZHIHU.db, lang, prefix)
+        if "<!-- sponsor wall -->" in page:
+            page = page.replace("<!-- sponsor wall -->", supporting, 1)
+        else:
+            page = page.replace("</main>", supporting + "</main>", 1)
         self.reply(200, page.encode(), "text/html", lang)
 
     do_HEAD = do_GET
