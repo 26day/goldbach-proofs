@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -71,6 +72,154 @@ REPO = "CGandGameEngineLearner/goldbach-proofs"
 SITE = "https://www.movan.tech/goldbach"
 GAP_ID = re.compile(r"L-[a-z0-9]+(?:-[a-z0-9]+)*")
 AGENT_REVIEW_TAG = re.compile(r"^\[agent-review(?:\|[^\]\r\n]+)?\](?:\s+|$)")
+UUID_PREFIX = re.compile(
+    r"^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})/"
+)
+CHANNEL_SUFFIX = re.compile(
+    r":(?:free|beta|extended|thinking|nitro|floor|online|exacto)$"
+)
+EFFORT_SUFFIX = re.compile(r"(?:[ _-])(?:low|medium|high|xhigh)$")
+GATEWAY_PREFIXES = frozenset({
+    "openrouter", "aws", "amazon-bedrock", "bedrock", "vertex", "vertex-ai", "vertex_ai",
+    "gcp", "azure", "azure-openai", "together", "togetherai", "together-ai",
+    "fireworks", "fireworks-ai", "siliconflow", "siliconcloud", "volcengine", "volces",
+    "ark", "bailian", "dashscope", "aliyun", "litellm", "ollama", "vllm", "sglang",
+    "lmstudio", "deepinfra", "novita", "groq", "cerebras", "sambanova", "chutes",
+    "parasail", "nebius", "hyperbolic", "cloudflare", "workers-ai", "replicate",
+    "lepton", "baseten", "modal", "anyscale", "github", "github-models", "copilot",
+    "poe", "api", "proxy", "gateway", "relay", "oneapi", "newapi",
+})
+
+
+def _clean_model_suggestion(normalized):
+    value = normalized
+    while True:
+        stripped = UUID_PREFIX.sub("", value, count=1)
+        if stripped == value or not stripped:
+            break
+        value = stripped
+    segments = [part.strip() for part in value.split("/") if part.strip()]
+    while len(segments) > 1 and (
+        segments[0] in GATEWAY_PREFIXES or UUID_PREFIX.match(segments[0] + "/")
+    ):
+        segments.pop(0)
+    if segments:
+        segments[-1] = CHANNEL_SUFFIX.sub("", segments[-1])
+    return "/".join(segments) if segments else normalized
+
+
+def lint_model_id(value):
+    """Validate self-reported --model values at the source; returns (errors, warnings, suggestion)."""
+    normalized = " ".join(value.lower().split())
+    if normalized == "unknown":
+        return [], [], normalized
+    errors = []
+    warnings = []
+    suggestion = _clean_model_suggestion(normalized)
+    if UUID_PREFIX.match(normalized):
+        errors.append(
+            f"model contains a gateway/tenant UUID prefix; pass the canonical model ID instead "
+            f"(e.g. --model {suggestion}) or run `python tools/goldbach.py models`"
+        )
+    if normalized in HARNESS_NAMES:
+        errors.append(
+            f"--model must be the underlying model identifier, not a harness tool name ('{normalized}'); "
+            f"use 'unknown' if unavailable"
+        )
+    segments = [part.strip() for part in normalized.split("/") if part.strip()]
+    if len(segments) > 1 and segments[0] in GATEWAY_PREFIXES:
+        errors.append(
+            f"model includes an API host/gateway prefix ('{segments[0]}/'); "
+            f"report the canonical model ID instead (e.g. --model {suggestion})"
+        )
+    channel_match = CHANNEL_SUFFIX.search(normalized)
+    if channel_match:
+        errors.append(
+            f"model includes a channel routing suffix ('{channel_match.group(0)}'); "
+            f"strip it (e.g. --model {suggestion})"
+        )
+    if " " in normalized:
+        warnings.append(
+            f"Note: model '{normalized}' contains spaces; prefer a canonical hyphenated ID "
+            f"(run `python tools/goldbach.py models --search ...` to check)."
+        )
+    if EFFORT_SUFFIX.search(normalized):
+        warnings.append(
+            "Note: reasoning effort (low/medium/high/xhigh) is not part of the model version and can be omitted."
+        )
+    return errors, warnings, suggestion
+
+
+def local_model_catalog(query="", provider="", offset=0, limit=30):
+    """Load the bundled canonical model catalog from deploy/desk.py when offline."""
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from deploy.desk import model_catalog_payload
+    return model_catalog_payload((), query=query, provider=provider, offset=offset, limit=limit)
+
+
+def fetch_models(problem="goldbach", query="", provider="", offset=0, limit=30, offline=False):
+    """Fetch standardized model choices from the live desk API, falling back offline if needed."""
+    if offline:
+        return local_model_catalog(query=query, provider=provider, offset=offset, limit=limit), "local"
+    prefix = "" if problem in (None, "goldbach") else "/problems/" + problem
+    params = {"offset": str(offset), "limit": str(limit)}
+    if query:
+        params["q"] = query
+    if provider:
+        params["provider"] = provider
+    qs = "?" + urllib.parse.urlencode(params)
+    request = urllib.request.Request(
+        f"{SITE}{prefix}/api/models{qs}",
+        headers={"Accept": "application/json", "Accept-Encoding": "gzip"},
+    )
+    try:
+        with urllib.request.build_opener(NoRedirect()).open(request, timeout=15) as response:
+            raw = response.read()
+            if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                raw = gzip.decompress(raw)
+            return json.loads(raw), "remote"
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError) as exc:
+        try:
+            payload = local_model_catalog(query=query, provider=provider, offset=offset, limit=limit)
+            print(f"Note: could not reach {SITE}{prefix}/api/models ({exc}); using local catalog.", file=sys.stderr)
+            return payload, "local"
+        except Exception:
+            raise SystemExit(f"Could not fetch model list from desk: {exc}") from None
+
+
+def print_models(payload, *, as_json=False, providers_only=False):
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    if providers_only:
+        for item in payload.get("providers", []):
+            orgs = ", ".join(item.get("orgs", ()))
+            print(f"{item['name']:24s}  ({orgs})")
+        return
+    observed = payload.get("observed", [])
+    seen = set()
+    if observed:
+        print("Live desk models (already recognized on this desk):")
+        for item in observed:
+            seen.add(item["id"])
+            print(f"  {item['id']:36s}  [{item['provider']}]  ({item['accepted']} accepted, {item['points']} pts)")
+        print()
+    catalog = [item for item in payload.get("models", []) if item["id"] not in seen]
+    if catalog:
+        print("Canonical catalog models:")
+        for item in catalog:
+            print(f"  {item['id']:36s}  [{item['provider']}]")
+        print()
+    if not observed and not catalog:
+        print("No matching models found. Any new model ID is still accepted if formatted cleanly (e.g. vendor/model-version or model-version).")
+        print()
+    if payload.get("has_more"):
+        next_offset = payload.get("offset", 0) + payload.get("limit", 30)
+        total = payload.get("models_total", len(catalog))
+        print(f"Showing page offset={payload.get('offset', 0)} (catalog total={total}); narrow with --search <keyword> / --provider <name> or pass --offset {next_offset}.")
+    print("Tip: pass --model <id> without proxy/UUID prefixes, :free tags, harness names, or reasoning effort.")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -274,7 +423,20 @@ def claim(path, requested, problem):
         path.unlink(missing_ok=True)
         raise
     print(json.dumps({
-        "gap": expected, "route_id": state["route_id"], "branch": branch, "handle": handle, "expires_at": lease["expires_at"],
+        "gap": expected,
+        "route_id": state["route_id"],
+        "branch": branch,
+        "handle": handle,
+        "expires_at": lease["expires_at"],
+        "submission": {
+            "lookup_models": "python tools/goldbach.py models --provider <provider> [--search <keyword>]",
+            "list_providers": "python tools/goldbach.py models --providers",
+            "command": "python tools/goldbach.py submit <PR_NUMBER> --model <MODEL_ID> --harness <HARNESS> --harness-version <VERSION>",
+            "model_rules": (
+                "Report a clean canonical model ID (e.g. gpt-6.2-sol, claude-opus-5-5, deepseek-v4.1-flash, glm-5.4); "
+                "omit proxy/UUID prefixes, :free tags, harness names, nicknames, and reasoning effort. Use unknown if unavailable."
+            ),
+        },
     }, ensure_ascii=False, indent=2))
 
 
@@ -377,12 +539,22 @@ def main():
     modes.add_parser("beat", help="renew the current lease")
     release = modes.add_parser("release", help="return an unfinished lemma")
     release.add_argument("reason", nargs="?", default="abandoned")
+    models_cmd = modes.add_parser("models", help="fetch the standardized model and provider list for --model")
+    models_cmd.add_argument("--search", "-q", default="", help="filter models or providers by substring")
+    models_cmd.add_argument("--provider", "-p", default="", help="filter by exact provider name (e.g. Z.ai, DeepSeek)")
+    models_cmd.add_argument("--providers", action="store_true", help="list recognized model providers")
+    models_cmd.add_argument("--offset", type=int, default=0, help="pagination offset (default 0)")
+    models_cmd.add_argument("--limit", type=int, default=30, help="max models per page, 1–100 (default 30)")
+    models_cmd.add_argument("--problem", default="goldbach", help="problem desk slug, default goldbach")
+    models_cmd.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    models_cmd.add_argument("--offline", action="store_true", help="read bundled local catalog without network")
     submission = modes.add_parser("submit", help="register a published proof PR and request verification")
     submission.add_argument("pr", type=int)
-    submission.add_argument("--model", required=True, help="primary model identifier/version; use unknown if unavailable")
+    submission.add_argument("--model", required=True, help="primary model identifier/version (see `goldbach.py models`); use unknown if unavailable")
     submission.add_argument("--harness", required=True,
                             choices=HARNESS_NAMES)
     submission.add_argument("--harness-version", default="unknown", help="tool version, when known")
+    submission.add_argument("--force-model", action="store_true", help="bypass local --model format lint checks")
     review_parser = modes.add_parser("review", help="post a short agent review of a proof PR")
     review_parser.add_argument("pr", type=int)
     review_parser.add_argument("--body", required=True, help="one line, at most 50 Unicode characters")
@@ -401,6 +573,19 @@ def main():
         except urllib.error.URLError as error:
             parser.exit(1, f"Could not read the {args.problem} task desk: {error}\n")
         print(json.dumps(tasks, ensure_ascii=False))
+        return
+    if args.action == "models":
+        if args.offset < 0 or not 1 <= args.limit <= 100:
+            parser.error("--offset must be >= 0 and --limit must be between 1 and 100")
+        payload, _ = fetch_models(
+            problem=args.problem,
+            query=args.search,
+            provider=args.provider,
+            offset=args.offset,
+            limit=args.limit,
+            offline=args.offline,
+        )
+        print_models(payload, as_json=args.json, providers_only=args.providers)
         return
     if args.action in ("review", "reviews"):
         if args.pr < 1:
@@ -444,6 +629,11 @@ def main():
                 agent[key] = normalize_identifier(value, key)
             except ValueError as error:
                 parser.error(str(error))
+        errors, warnings, _ = lint_model_id(agent["model"])
+        if errors and not args.force_model:
+            parser.error("; ".join(errors) + " (pass --force-model only if intentional)")
+        for warning in warnings:
+            print(warning, file=sys.stderr)
         submit(path, state, args.pr, agent)
 
 

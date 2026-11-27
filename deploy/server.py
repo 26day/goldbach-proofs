@@ -18,7 +18,7 @@ from pathlib import Path
 from threading import BoundedSemaphore, Lock, Thread
 from urllib.parse import parse_qs, urlsplit
 
-from desk import Desk, QUEUE_BATCH
+from desk import Desk, QUEUE_BATCH, model_catalog_payload
 from landau import BASELINE, exponent_record
 from presence import SitePresence
 from zhihu_oauth import BASE as ZHIHU_PATH, ZhihuOAuth
@@ -1101,6 +1101,44 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, body)
             except sqlite3.Error:
                 return self.reply(503, b'{"error":"records unavailable"}')
+        if path == "/api/models":
+            query = parse_qs(url.query, keep_blank_values=True)
+            if not set(query) <= {"q", "provider", "offset", "limit"}:
+                return self.reply(400, b'{"error":"invalid models query"}')
+            q_param = query.get("q", [""])
+            provider_param = query.get("provider", [""])
+            offset_param = query.get("offset", ["0"])
+            limit_param = query.get("limit", ["30"])
+            if (len(q_param) != 1 or len(q_param[0]) > 96
+                    or len(provider_param) != 1 or len(provider_param[0]) > 64
+                    or len(offset_param) != 1 or not re.fullmatch(r"[0-9]{1,5}", offset_param[0])
+                    or len(limit_param) != 1 or not re.fullmatch(r"[1-9][0-9]{0,2}", limit_param[0])):
+                return self.reply(400, b'{"error":"invalid models query"}')
+            limit = int(limit_param[0])
+            if not 1 <= limit <= 100:
+                return self.reply(400, b'{"error":"invalid models query"}')
+            try:
+                _, agent_rankings = rankings_snapshot(desk)
+                observed = agent_rankings.get("models", [])
+            except sqlite3.Error:
+                observed = ()
+            payload = model_catalog_payload(
+                observed,
+                query=q_param[0],
+                provider=provider_param[0],
+                offset=int(offset_param[0]),
+                limit=limit,
+            )
+            body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+            compress = accepts_gzip(self.headers.get("Accept-Encoding", ""))
+            if compress:
+                body = gzip.compress(body, compresslevel=3)
+            return self.public_conditional(
+                body,
+                encoding="gzip" if compress else None,
+                cache="public, max-age=60",
+                vary=True,
+            )
         if path == "/api/rankings":
             query = parse_qs(url.query, keep_blank_values=True)
             if not set(query) <= {"mode", "offset", "limit"}:

@@ -36,7 +36,7 @@ class DeskScaleTest(unittest.TestCase):
         self.secret = secrets.token_hex(32).encode()
         (folder / "webhook").write_bytes(self.secret)
         (folder / "china-apnic.txt").write_bytes(b"")
-        for source in ("deploy/server.py", "deploy/site.js", "deploy/site.css", "deploy/desk.py", "deploy/landau.py", "deploy/presence.py", "deploy/join.txt", "deploy/join-zh.txt",
+        for source in ("deploy/server.py", "deploy/site.js", "deploy/site.css", "deploy/desk.py", "deploy/model-aliases.json", "deploy/landau.py", "deploy/presence.py", "deploy/join.txt", "deploy/join-zh.txt",
                        "deploy/zhihu_oauth.py", "deploy/sponsors.py", "deploy/github_identity.py", "deploy/zh.html", "deploy/en.html",
                        "research/gaps.json", "research/problems.json"):
             shutil.copy(ROOT / source, folder)
@@ -448,6 +448,16 @@ class DeskScaleTest(unittest.TestCase):
 
         self.request("/api/rankings?mode=invalid", expected=400)
         self.request("/api/rankings?mode=all_time&limit=99", expected=400)
+
+        models_api = self.request("/api/models?q=glm")
+        self.assertTrue(any(m["id"] == "glm-5.4" and m["provider"] == "Z.ai" for m in models_api["models"]))
+        self.assertIn("providers", models_api)
+        self.assertIn("harnesses", models_api)
+        models_paged = self.request("/api/models?offset=10&limit=10")
+        self.assertEqual(len(models_paged["models"]), 10)
+        self.assertNotIn("providers", models_paged)
+        self.request("/api/models?unknown=1", expected=400)
+        self.request("/api/models?limit=101", expected=400)
 
 
 if __name__ == "__main__":
