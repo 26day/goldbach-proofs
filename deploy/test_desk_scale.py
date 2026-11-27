@@ -39,7 +39,7 @@ class DeskServerTestCase(unittest.TestCase):
         self.secret = secrets.token_hex(32).encode()
         (folder / "webhook").write_bytes(self.secret)
         (folder / "china-apnic.txt").write_bytes(b"")
-        for source in ("deploy/server.py", "deploy/site.js", "deploy/site.css", "deploy/desk.py", "deploy/reductions.py", "deploy/model-aliases.json", "deploy/landau.py", "deploy/presence.py", "deploy/join.txt", "deploy/join-zh.txt",
+        for source in ("deploy/server.py", "deploy/site.js", "deploy/site.css", "deploy/desk.py", "deploy/reductions.py", "deploy/model-aliases.json", "deploy/agent-icons.svg", "deploy/landau.py", "deploy/presence.py", "deploy/join.txt", "deploy/join-zh.txt",
                        "deploy/zhihu_oauth.py", "deploy/sponsors.py", "deploy/github_identity.py", "deploy/zh.html", "deploy/en.html",
                        "research/gaps.json", "research/problems.json"):
             shutil.copy(ROOT / source, folder)
@@ -136,7 +136,7 @@ class DeskScaleTest(DeskServerTestCase):
             self.assertEqual(status["results"][0]["agent"], {**agent, "source": "self_reported"})
             self.assertEqual({k: v for k, v in status["desk"]["agent_rankings"].items() if k != "providers"}, {
                 "models": [{"name": "model-test-v1", "accepted": 1, "points": 1}],
-                "harnesses": [{"name": "codex", "accepted": 1, "points": 1}], "proofs": 1})
+                "harnesses": [{"name": "codex", "accepted": 1, "points": 1, "icon": "codex"}], "proofs": 1})
             self.assertEqual(status["desk"]["rankings"]["proofs"], 1)
             for lang in ("zh", "en"):
                 page = self.request(path + "/?lang=" + lang, text=True)
@@ -465,6 +465,16 @@ class DeskScaleTest(DeskServerTestCase):
         self.assertNotIn("providers", models_paged)
         self.request("/api/models?unknown=1", expected=400)
         self.request("/api/models?limit=101", expected=400)
+
+        with closing(HTTPSConnection("127.0.0.1", self.port, context=self.context)) as conn:
+            conn.request("GET", "/agent-icons.svg", headers={"Accept-Encoding": "gzip"})
+            response = conn.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get("Content-Type"), "image/svg+xml")
+            sprite_svg = gzip.decompress(response.read()).decode("utf-8")
+            self.assertIn('id="brand-nex-agi"', sprite_svg)
+            self.assertIn('id="brand-antigravity"', sprite_svg)
+            self.assertIn('id="brand-tool-other"', sprite_svg)
 
 
 if __name__ == "__main__":

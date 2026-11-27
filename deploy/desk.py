@@ -386,141 +386,145 @@ def model_ranking_name(value):
 # Reference: https://openrouter.ai/models and https://models.dev/
 MODEL_REGISTRY = {
     "OpenAI": {
-        "icon": 0,
+        "icon": "openai",
         "orgs": ("openai",),
         "families": (r"gpt", r"chatgpt", r"o[134](?=$|[._:-]|-mini|-pro|-preview)"),
     },
     "Anthropic": {
-        "icon": 1,
+        "icon": "claude",
         "orgs": ("anthropic",),
         "families": (r"claude",),
     },
     "Google": {
-        "icon": 21,
+        "icon": "google",
         "orgs": ("google",),
         "families": (r"gemini", r"gemma", r"palm"),
-        "family_icons": ((r"gemini", 2), (r"gemma", 20)),
+        "family_icons": ((r"gemini", "gemini"), (r"gemma", "gemma")),
     },
     "MiniMax": {
-        "icon": 12,
+        "icon": "minimax",
         "orgs": ("minimax", "minimaxai"),
         "families": (r"minimax", r"abab"),
     },
     "DeepSeek": {
-        "icon": 3,
+        "icon": "deepseek",
         "orgs": ("deepseek", "deepseek-ai"),
         "families": (r"deepseek",),
     },
     "Alibaba": {
-        "icon": 28,
+        "icon": "alibaba",
         "orgs": ("alibaba", "qwen", "tongyi"),
         "families": (r"qwen", r"qwq", r"qvq", r"tongyi"),
-        "family_icons": ((r"qwen|qwq|qvq|tongyi", 4),),
+        "family_icons": ((r"qwen|qwq|qvq|tongyi", "qwen"),),
     },
     "Moonshot AI": {
-        "icon": 33,
+        "icon": "moonshot",
         "orgs": ("moonshot", "moonshotai"),
         "families": (r"kimi", r"moonshot"),
-        "family_icons": ((r"kimi", 8),),
+        "family_icons": ((r"kimi", "kimi"),),
     },
     "Meta": {
-        "icon": 6,
+        "icon": "meta",
         "orgs": ("meta", "meta-llama"),
         "families": (r"llama",),
     },
     "Mistral AI": {
-        "icon": 7,
+        "icon": "mistral",
         "orgs": ("mistral", "mistralai"),
         "families": (r"mistral", r"mixtral", r"codestral", r"devstral", r"magistral", r"ministral", r"pixtral", r"voxtral"),
     },
     "xAI": {
-        "icon": 5,
+        "icon": "xai",
         "orgs": ("xai", "x-ai"),
         "families": (r"grok",),
+        "family_icons": ((r"grok", "grok"),),
     },
     "Z.ai": {
-        "icon": 9,
+        "icon": "zhipu",
         "orgs": ("zai", "z-ai", "zhipu", "zhipuai", "thudm"),
         "families": (r"glm", r"chatglm"),
     },
     "ByteDance": {
-        "icon": 10,
+        "icon": "bytedance",
         "orgs": ("bytedance", "bytedance-seed"),
         "families": (r"doubao", r"seed(?=[ -]?[0-9]|-oss|-coder|-pro|-thinking)"),
+        "family_icons": ((r"doubao|seed", "doubao"),),
     },
     "Baidu": {
-        "icon": 11,
+        "icon": "baidu",
         "orgs": ("baidu",),
         "families": (r"ernie", r"wenxin"),
+        "family_icons": ((r"ernie|wenxin", "wenxin"),),
     },
     "Tencent": {
-        "icon": 29,
+        "icon": "tencent",
         "orgs": ("tencent",),
         "families": (r"hunyuan", r"hy(?=[0-9])"),
-        "family_icons": ((r"hunyuan|hy(?=[0-9])", 18),),
+        "family_icons": ((r"hunyuan|hy(?=[0-9])", "hunyuan"),),
     },
     "StepFun": {
-        "icon": 19,
+        "icon": "stepfun",
         "orgs": ("stepfun", "step-fun"),
         "families": (r"step(?=[ -]?[0-9])",),
     },
     "Microsoft": {
-        "icon": 17,
+        "icon": "microsoft",
         "orgs": ("microsoft",),
         "families": (r"phi(?=$|[0-9 ._-])", r"mai(?=[ -]?[0-9])"),
     },
     "NVIDIA": {
-        "icon": 16,
+        "icon": "nvidia",
         "orgs": ("nvidia",),
         "families": (r"nemotron",),
     },
     "Amazon": {
-        "icon": None,
+        "icon": "amazon",
         "orgs": ("amazon",),
         "families": (r"amazon-nova", r"nova(?=-?(?:micro|lite|pro|premier|sonic|reel|canvas|[0-9]))"),
+        "family_icons": ((r"amazon-nova|nova", "nova"),),
     },
     "IBM": {
-        "icon": 30,
+        "icon": "ibm",
         "orgs": ("ibm", "ibm-granite"),
         "families": (r"granite",),
     },
     "Cohere": {
-        "icon": 14,
+        "icon": "cohere",
         "orgs": ("cohere",),
         "families": (r"command-r", r"command-a", r"aya-expanse"),
     },
     "AI21 Labs": {
-        "icon": 15,
+        "icon": "ai21",
         "orgs": ("ai21", "ai21labs"),
         "families": (r"jamba",),
     },
     "Perplexity": {
-        "icon": 27,
+        "icon": "perplexity",
         "orgs": ("perplexity",),
         "families": (r"sonar",),
     },
     "01.AI": {
-        "icon": 13,
+        "icon": "zeroone",
         "orgs": ("01-ai", "01.ai"),
         "families": (r"yi(?=-[0-9])",),
     },
     "Xiaomi": {
-        "icon": None,
+        "icon": "xiaomi",
         "orgs": ("xiaomi",),
         "families": (r"mimo",),
     },
     "InclusionAI": {
-        "icon": None,
+        "icon": "ling",
         "orgs": ("inclusionai", "inclusion-ai"),
         "families": (r"ling(?=[ -]?[0-9])", r"ring(?=[ -]?[0-9])"),
     },
     "Meituan": {
-        "icon": None,
+        "icon": "longcat",
         "orgs": ("meituan",),
         "families": (r"longcat", r"long-cat"),
     },
     "Nex AGI": {
-        "icon": None,
+        "icon": "nex-agi",
         "orgs": ("nex-agi", "nexagi"),
         "families": (r"nex-n(?=[0-9])",),
     },
@@ -530,12 +534,12 @@ MODEL_REGISTRY = {
         "families": (r"olmo", r"molmo", r"tulu"),
     },
     "Nous Research": {
-        "icon": None,
+        "icon": "nous",
         "orgs": ("nousresearch", "nous-research"),
         "families": (r"hermes(?=[ -]?[0-9])",),
     },
     "Hugging Face": {
-        "icon": 31,
+        "icon": "huggingface",
         "orgs": ("huggingface", "hugging-face", "huggingfaceh4"),
         "families": (r"smollm",),
     },
@@ -545,7 +549,7 @@ MODEL_REGISTRY = {
         "families": (r"hyperclova",),
     },
     "LG AI Research": {
-        "icon": None,
+        "icon": "lg",
         "orgs": ("lgairesearch", "lg-ai-research"),
         "families": (r"exaone",),
     },
@@ -559,6 +563,45 @@ MODEL_REGISTRY = {
         "orgs": ("writer",),
         "families": (r"palmyra",),
     },
+}
+
+# Semantic SVG sprite icon keys (`deploy/agent-icons.svg#brand-<key>`) for coding harnesses.
+HARNESS_ICONS = {
+    "codex": "codex",
+    "claude-code": "claude-code",
+    "cursor": "cursor",
+    "gemini-cli": "gemini-cli",
+    "opencode": "opencode",
+    "kimi-code": "kimi",
+    "minimax-code": "minimax",
+    "zcode": "zcode",
+    "qwen-code": "qwen",
+    "qoder": "qoder",
+    "qoder-cn": "qoder",
+    "lingma": "alibaba",
+    "trae": "trae",
+    "codebuddy": "codebuddy",
+    "comate": "baidu",
+    "codegeex": "codegeex",
+    "iflycode": "iflytek",
+    "github-copilot": "github-copilot",
+    "github-copilot-cli": "github-copilot",
+    "windsurf": "windsurf",
+    "cline": "cline",
+    "roo-code": "roo-code",
+    "kilo-code": "kilo-code",
+    "goose": "goose",
+    "openhands": "openhands",
+    "kiro": "kiro",
+    "amazon-q": "amazon",
+    "devin": "devin",
+    "devin-desktop": "devin",
+    "junie": "junie",
+    "replit-agent": "replit",
+    "mistral-vibe": "mistral",
+    "antigravity": "antigravity",
+    "hermes-agent": "nous",
+    "other": "tool-other",
 }
 
 # Canonical model catalog snapshot for client discovery (`GET /api/models`,
@@ -778,6 +821,10 @@ def model_provider(name):
 def provider_brand_icon(provider):
     spec = MODEL_REGISTRY.get(provider)
     return spec["icon"] if spec else None
+
+
+def harness_brand_icon(name):
+    return HARNESS_ICONS.get(name)
 
 
 def model_brand_icon(name, provider=None):
@@ -1491,7 +1538,12 @@ class Desk:
             if model.get("cuts"):
                 entry["cuts"] = entry.get("cuts", 0) + model["cuts"]
             entry["models"].append(model)
-        return {"models": models, "harnesses": ranking(1), "proofs": sum(row["accepted"] for row in winners),
+        harnesses = ranking(1)
+        for harness in harnesses:
+            h_icon = harness_brand_icon(harness["name"])
+            if h_icon is not None:
+                harness["icon"] = h_icon
+        return {"models": models, "harnesses": harnesses, "proofs": sum(row["accepted"] for row in winners),
                 "providers": sorted(providers.values(), key=lambda row: (-row["points"], -row["accepted"], row["name"]))}
 
     def public_status(self):
