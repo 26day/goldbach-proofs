@@ -73,11 +73,15 @@ class AttributionTests(unittest.TestCase):
         self.assertNotIn("harnessBrandIcons", site_js)
 
     def test_svg_sprite_integrity_and_complete_symbol_coverage(self):
+        import xml.etree.ElementTree as ET
         root = Path(__file__).resolve().parents[1]
         sprite_path = root / "deploy/agent-icons.svg"
         self.assertTrue(sprite_path.is_file())
         compiled, keys = build_icons.compile_sprite()
         self.assertEqual(sprite_path.read_text(encoding="utf-8"), compiled)
+        # Strict XML parse check prevents duplicate attributes (e.g. duplicate xmlns) from breaking DOMParser.
+        parsed = ET.fromstring(compiled)
+        self.assertTrue(parsed.tag.endswith("}svg"))
         symbol_keys = set(keys)
         # Every icon key referenced by MODEL_REGISTRY, HARNESS_ICONS, and fallbacks must exist.
         referenced = {"provider-unknown", "tool-other"}

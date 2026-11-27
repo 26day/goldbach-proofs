@@ -83,7 +83,6 @@ def _validate_safe_svg(element, path):
 
 def compile_sprite(src_dir=SRC_DIR):
     sprite = ET.Element(f"{{{SVG_NS}}}svg", {
-        "xmlns": SVG_NS,
         "aria-hidden": "true",
         "style": "position:absolute;width:0;height:0;overflow:hidden",
     })
@@ -124,10 +123,10 @@ def compile_sprite(src_dir=SRC_DIR):
     if len(top_defs) == 0:
         sprite.remove(top_defs)
 
-    # Compact deterministic serialization.
+    # Compact deterministic serialization and strict XML round-trip validation.
     raw = ET.tostring(sprite, encoding="unicode")
-    # Clean redundant default xmlns on inner elements if any and keep single trailing newline.
     raw = re.sub(r">\s+<", "><", raw) + "\n"
+    ET.fromstring(raw)
     return raw, keys
 
 
