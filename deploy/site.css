@@ -1366,9 +1366,13 @@ body:not([data-problem]) .hero-lead-bar::before {
   flex: 1;
   min-width: 0;
   margin-top: 0;
-  padding: .24rem 0 .24rem clamp(.85rem, 1.3vw, 1.1rem);
+  padding: .24rem 0 .24rem clamp(.9rem, 1.35vw, 1.2rem);
   border-block: 0;
   border-left: 1px solid var(--line);
+}
+.hero-lead-bar .colophon-credits {
+  font-size: clamp(1.06rem, 1.12vw, 1.26rem);
+  gap: .45rem .92rem;
 }
 body[data-problem] .hero-lead-bar .hero-colophon {
   padding: 0;
@@ -2214,7 +2218,8 @@ main > .sponsor-wall { width: 100%; }
   .desk-dashboard > .presence-inline summary { padding: .5rem .8rem; font-size: .75rem; }
   .desk-dashboard > .presence-inline > p { margin-top: 0; padding: .55rem .8rem .7rem; }
   .hero-colophon { margin-top: .78rem; padding-block: .58rem; }
-  .colophon-credits { font-size: .82rem; gap: .34rem .46rem; }
+  .colophon-credits,
+  .hero-lead-bar .colophon-credits { font-size: .82rem; gap: .34rem .46rem; }
   .hero-origin { margin-top: .75rem; padding-top: .62rem; font-size: .8rem; }
   .sponsor-marquee-stage {
     -webkit-mask-image: linear-gradient(to right, transparent, #000 22px, #000 calc(100% - 22px), transparent);
