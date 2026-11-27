@@ -694,27 +694,50 @@ function agentName(name) {
   return Object.hasOwn(harnessLabels, name) ? harnessLabels[name] : name;
 }
 
-const harnessBrandIcons = {
-  'codex': 22,
-  'claude-code': 23,
-  'cursor': 24,
-  'gemini-cli': 25,
-  'opencode': 26,
-};
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const BRAND_ICON_KEY = /^[a-z0-9][a-z0-9-]{0,31}$/;
+let brandSpritePromise = null;
+
+function ensureBrandSprite() {
+  if (brandSpritePromise || document.getElementById('agent-brand-sprite')) return;
+  const spriteUrl = document.getElementById('rankings')?.dataset.brandSprite || 'agent-icons.svg';
+  brandSpritePromise = fetch(spriteUrl)
+    .then(res => (res.ok ? res.text() : ''))
+    .then(markup => {
+      if (!markup || document.getElementById('agent-brand-sprite')) return;
+      const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
+      const svg = doc.documentElement;
+      if (!svg || svg.nodeName.toLowerCase() !== 'svg') return;
+      svg.id = 'agent-brand-sprite';
+      svg.setAttribute('aria-hidden', 'true');
+      svg.style.position = 'absolute';
+      svg.style.width = '0';
+      svg.style.height = '0';
+      svg.style.overflow = 'hidden';
+      svg.style.pointerEvents = 'none';
+      document.body.prepend(svg);
+    })
+    .catch(() => { brandSpritePromise = null; });
+}
 
 function agentBrandIcon(entry, kind = 'models') {
   const name = typeof entry === 'string' ? entry : (entry?.name || '');
-  let slot = null;
-  if (entry && typeof entry === 'object' && Number.isInteger(entry.icon)) {
-    slot = entry.icon;
-  } else if (kind === 'harnesses' && Object.hasOwn(harnessBrandIcons, name)) {
-    slot = harnessBrandIcons[name];
-  }
-  const icon = element('span', slot !== null ? '' : name.slice(0, 1).toUpperCase(), 'agent-brand-icon');
+  let key = entry && typeof entry === 'object' && typeof entry.icon === 'string' && BRAND_ICON_KEY.test(entry.icon)
+    ? entry.icon
+    : null;
+  if (!key && kind === 'providers' && name === 'unknown') key = 'provider-unknown';
+  const icon = element('span', key ? '' : name.slice(0, 1).toUpperCase(), 'agent-brand-icon');
   icon.setAttribute('aria-hidden', 'true');
-  if (slot !== null) {
+  if (key) {
+    ensureBrandSprite();
     icon.classList.add('has-brand');
-    icon.style.backgroundPosition = '-' + (slot * 32) + 'px 0';
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('class', 'agent-brand-svg');
+    svg.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS(SVG_NS, 'use');
+    use.setAttribute('href', '#brand-' + key);
+    svg.append(use);
+    icon.append(svg);
   }
   return icon;
 }

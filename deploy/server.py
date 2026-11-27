@@ -137,7 +137,7 @@ Thread(target=refresh_presence_counts, name="presence-counts", daemon=True).star
 
 
 ASSETS = {
-    "/agent-icons.png": "image/png",
+    "/agent-icons.svg": "image/svg+xml",
     "/core-team-signup.png": "image/png",
     sponsors.STYLE: "text/css",
     sponsors.SCRIPT: "text/javascript",
@@ -157,7 +157,7 @@ def asset_version(name):
     return hashlib.sha256(path.read_bytes()).hexdigest()[:8] if path.exists() else ""
 
 
-ASSET_VERSIONS = {name: asset_version(name) for name in ("site.css", "site.js")}
+ASSET_VERSIONS = {name: asset_version(name) for name in ("site.css", "site.js", "agent-icons.svg")}
 
 
 def version_assets(page, prefix=""):
@@ -631,6 +631,7 @@ def problem_page(page, slug, lang):
         'src="site.js"', 'src="../../site.js"')
     page = page.replace('href="goldbach-icon.svg"', 'href="../../goldbach-icon.svg"')
     page = page.replace('src="goldbach-icon.svg"', 'src="../../goldbach-icon.svg"')
+    page = page.replace('data-brand-sprite="agent-icons.svg"', 'data-brand-sprite="../../agent-icons.svg"')
     page = page.replace('href="auth/zhihu?', 'href="../../auth/zhihu?')
     page = re.sub(r'(<h1 id="page-title">).*?(</h1>)', lambda m: m[1] + title + m[2], page)
     page = re.sub(r'(<p class="hero-question">).*?(</p>)', lambda m: m[1] + question + m[2], page)

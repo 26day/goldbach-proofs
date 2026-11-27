@@ -1722,8 +1722,9 @@ body:not([data-problem]) .hero .open-status { vertical-align: middle; }
   padding: .4rem .7rem;
   background: var(--paper);
 }
-.agent-brand-icon { flex: 0 0 32px; width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: 6px; background: #edeae3; font-size: .875rem; }
-.agent-brand-icon.has-brand { background-image: url("agent-icons.png"); background-color: transparent; background-size: 1088px 32px; }
+.agent-brand-icon { flex: 0 0 32px; width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: 6px; background: #edeae3; color: var(--ink); font-size: .875rem; }
+.agent-brand-icon.has-brand { background-color: transparent; }
+.agent-brand-svg { width: 28px; height: 28px; display: block; }
 
 /* Route summaries share status and task membership with the public desk. */
 .goldbach-tracks .route-panel { border-top: 1px solid var(--line); }
