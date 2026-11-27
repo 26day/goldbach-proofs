@@ -1085,6 +1085,7 @@ class Handler(BaseHTTPRequestHandler):
         page = page.replace("<!-- hero community -->", hero_community_card(lang, prefix), 1)
         page = page.replace("<!-- hero colophon -->",
                             sponsors.author_colophon(ZHIHU.db, lang, prefix, goldbach=(slug == "goldbach")), 1)
+        page = page.replace("<!-- footer credit -->", sponsors.footer_credit(ZHIHU.db, lang, prefix), 1)
         if "<!-- site dock -->" in page:
             page = page.replace("<!-- site dock -->", site_dock(lang, prefix, inline=True), 1)
         else:

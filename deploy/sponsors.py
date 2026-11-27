@@ -115,7 +115,7 @@ AI_WORKS_URL = "https://www.zhihu.com/project/detail/210995"
 ZHIHU_DISCUSS_URL = "https://www.zhihu.com/question/2108591052059665116"
 
 
-def author_colophon(path, lang, prefix, *, goldbach=True):
+def coinitiator_lockup(path, lang, prefix):
     zh = lang == "zh"
     logo_id = None
     co_url = ZHIHU_SCIENCE_URL
@@ -146,29 +146,7 @@ def author_colophon(path, lang, prefix, *, goldbach=True):
         f'<img class="coinitiator-logo" src="{prefix}sponsors/logo/{logo_id}.png" alt="{co_name}" loading="eager">'
         if logo_id is not None else f'<strong>{co_name}</strong>'
     )
-    if goldbach:
-        if zh:
-            origin_html = (
-                '<p class="colophon-origin">发起人与联合发起 · 于知乎 AI4S 讨论社群「知乎 研 Club」发起，知乎科学持续支持研究者连接、公开讨论与阶段成果传播。</p>'
-                f'<p class="colophon-links">'
-                f'<a href="{AI_WORKS_URL}" target="_blank" rel="noopener noreferrer">知乎 AI Works 入口 <span aria-hidden="true">↗</span></a>'
-                f'<span aria-hidden="true">·</span>'
-                f'<a href="{ZHIHU_DISCUSS_URL}" target="_blank" rel="noopener noreferrer">参与知乎公开讨论 <span aria-hidden="true">↗</span></a>'
-                f'</p>'
-            )
-        else:
-            origin_html = (
-                '<p class="colophon-origin">Initiator &amp; Co-initiator · Initiated in the Zhihu AI4S community “Zhihu Yan Club”. Zhihu Science supports connecting researchers, open discussion, and sharing milestones.</p>'
-                f'<p class="colophon-links">'
-                f'<a href="{AI_WORKS_URL}" target="_blank" rel="noopener noreferrer">Zhihu AI Works <span aria-hidden="true">↗</span></a>'
-                f'<span aria-hidden="true">·</span>'
-                f'<a href="{ZHIHU_DISCUSS_URL}" target="_blank" rel="noopener noreferrer">Join open discussion on Zhihu <span aria-hidden="true">↗</span></a>'
-                f'</p>'
-            )
-    else:
-        origin_html = f'<p class="colophon-origin">{"发起人与联合发起" if zh else "Initiator &amp; Co-initiator"}</p>'
     return (
-        f'<div class="hero-colophon">'
         f'<div class="colophon-credits">'
         f'<a class="colophon-person" href="{INITIATOR_URL}" target="_blank" rel="noopener noreferrer">'
         f'<span class="author-avatar" aria-hidden="true">L<img src="{escape(avatar_url)}" alt="" loading="eager" referrerpolicy="no-referrer"></span>'
@@ -177,9 +155,36 @@ def author_colophon(path, lang, prefix, *, goldbach=True):
         f'<a class="colophon-org" href="{escape(co_url)}" target="_blank" rel="noopener noreferrer ugc nofollow">'
         f'{co_content}</a>'
         f'</div>'
-        f'{origin_html}'
-        f'</div>'
     )
+
+
+def author_colophon(path, lang, prefix, *, goldbach=True):
+    zh = lang == "zh"
+    origin_html = ""
+    if goldbach:
+        if zh:
+            origin_html = (
+                '<p class="colophon-origin">由知乎答主 lifesize 在知乎 AI4S 讨论社群「知乎 研 Club」中发起。知乎科学持续支持研究者连接、公开讨论与阶段成果传播。</p>'
+                f'<p class="colophon-links">'
+                f'<a href="{AI_WORKS_URL}" target="_blank" rel="noopener noreferrer">知乎 AI Works 入口 <span aria-hidden="true">↗</span></a>'
+                f'<span aria-hidden="true">·</span>'
+                f'<a href="{ZHIHU_DISCUSS_URL}" target="_blank" rel="noopener noreferrer">参与知乎公开讨论 <span aria-hidden="true">↗</span></a>'
+                f'</p>'
+            )
+        else:
+            origin_html = (
+                '<p class="colophon-origin">Initiated by Zhihu creator lifesize in the Zhihu AI4S community “Zhihu Yan Club”. Zhihu Science supports connecting researchers, open discussion, and sharing milestones.</p>'
+                f'<p class="colophon-links">'
+                f'<a href="{AI_WORKS_URL}" target="_blank" rel="noopener noreferrer">Zhihu AI Works <span aria-hidden="true">↗</span></a>'
+                f'<span aria-hidden="true">·</span>'
+                f'<a href="{ZHIHU_DISCUSS_URL}" target="_blank" rel="noopener noreferrer">Join open discussion on Zhihu <span aria-hidden="true">↗</span></a>'
+                f'</p>'
+            )
+    return f'<div class="hero-colophon">{coinitiator_lockup(path, lang, prefix)}{origin_html}</div>'
+
+
+def footer_credit(path, lang, prefix):
+    return f'<div class="footer-credit-line">{coinitiator_lockup(path, lang, prefix)}</div>'
 
 
 def wall(path, lang, prefix):
