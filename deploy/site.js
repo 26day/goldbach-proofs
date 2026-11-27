@@ -130,14 +130,16 @@ const deskNotice = document.getElementById('desk-notice');
 const deskActivity = document.getElementById('desk-activity');
 const rankingsList = document.getElementById('rankings-list');
 const rankingsModes = Array.from(document.querySelectorAll('[data-ranking-mode]'));
-const rankingsAll = document.getElementById('rankings-all');
-const rankingsDialog = document.getElementById('rankings-dialog');
-const rankingsFullList = document.getElementById('rankings-full-list');
 const rankingsAnnouncement = document.getElementById('rankings-announcement');
+const RANKINGS_BATCH = 12;
 let rankingsData = null;
 let rankingsSnapshot = null;
 let rankingMode = null;
 let agentRankingsData = null;
+let rankingsEpoch = 0;
+let rankingObserver = null;
+let activeRankingScroll = null;
+const rankingFeeds = {};
 const locale = document.documentElement.lang;
 const eventTime = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
 const relativeTime = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
@@ -670,19 +672,158 @@ function agentBrandIcon(name) {
   return icon;
 }
 
-function renderAgentRankingRow(entry, index) {
+function renderAgentRankingRow(entry, index, isProvider = false) {
   const item = element('li', undefined, 'ranking-row agent-ranking-row');
-  const name = element('strong', undefined, 'ranking-name agent-brand-name');
-  name.append(agentBrandIcon(entry.name), element('span', agentName(entry.name)));
+  const labelText = isProvider && entry.name === 'unknown'
+    ? (lang === 'zh' ? '未识别厂商' : 'Unidentified provider')
+    : agentName(entry.name);
+  const name = element('div', undefined, 'ranking-name agent-brand-name');
+  name.append(agentBrandIcon(entry.name), element('strong', labelText, 'agent-brand-label'));
+  if (isProvider && Array.isArray(entry.models) && entry.models.length) {
+    const showLabel = lang === 'zh' ? '查看旗下模型' : 'Show models';
+    const hideLabel = lang === 'zh' ? '收起旗下模型' : 'Hide models';
+    const toggle = element('button', showLabel, 'provider-toggle');
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', 'false');
+    let subList = null;
+    toggle.addEventListener('click', () => {
+      const expanded = toggle.getAttribute('aria-expanded') === 'true';
+      if (!subList) {
+        subList = element('ol', undefined, 'ranking-list provider-models-list');
+        subList.append(...entry.models.map((m, i) => renderAgentRankingRow(m, i, false)));
+        item.append(subList);
+      }
+      subList.hidden = expanded;
+      toggle.setAttribute('aria-expanded', String(!expanded));
+      toggle.textContent = expanded ? showLabel : hideLabel;
+      const scrollBox = item.closest('.ranking-scroll');
+      if (scrollBox) updateRankingFade(scrollBox);
+    });
+    name.append(toggle);
+  }
   item.append(element('span', index + 1, 'ranking-position'), name,
     renderRankingResult(entry, strings.rankingPeriods.all_time));
   return item;
 }
 
 let agentDimension = 'providers';
-let selectedModel = '';
 
-function renderAgentColumns(container, limit = Infinity) {
+function seedRankingFeeds(rankings, agentRankings) {
+  rankingsEpoch += 1;
+  const setFeed = (key, rows, total) => {
+    const items = Array.isArray(rows) ? rows.slice() : [];
+    const resolvedTotal = Number.isSafeInteger(total) ? Math.max(total, items.length) : items.length;
+    rankingFeeds[key] = {
+      items,
+      total: resolvedTotal,
+      hasMore: items.length < resolvedTotal,
+      loading: false,
+      epoch: rankingsEpoch,
+    };
+  };
+  setFeed('all_time', rankings?.all_time, rankings?.all_time_total ?? rankings?.contributors);
+  setFeed('hour', rankings?.hour, rankings?.hour_total);
+  const totals = agentRankings?.totals || {};
+  setFeed('providers', agentRankings?.providers, totals.providers);
+  setFeed('models', agentRankings?.models, totals.models);
+  setFeed('harnesses', agentRankings?.harnesses, totals.harnesses);
+}
+
+function updateRankingFade(scrollEl, hasMoreRemote = false) {
+  const canScrollDown = scrollEl.scrollHeight - scrollEl.clientHeight - scrollEl.scrollTop > 6;
+  scrollEl.classList.toggle('has-more-below', canScrollDown || hasMoreRemote);
+}
+
+function mountProgressiveRankings(scrollEl, key, renderRow, emptyText) {
+  if (rankingObserver) {
+    rankingObserver.disconnect();
+    rankingObserver = null;
+  }
+  if (activeRankingScroll && activeRankingScroll._onRankingScroll) {
+    activeRankingScroll.removeEventListener('scroll', activeRankingScroll._onRankingScroll);
+    delete activeRankingScroll._onRankingScroll;
+  }
+  activeRankingScroll = scrollEl;
+  const feed = rankingFeeds[key] || { items: [], total: 0, hasMore: false, loading: false, epoch: rankingsEpoch };
+  scrollEl.scrollTop = 0;
+
+  if (!feed.items.length && !feed.hasMore) {
+    scrollEl.replaceChildren(element('li', emptyText, 'ranking-empty'));
+    scrollEl.classList.remove('has-more-below');
+    return;
+  }
+
+  let rendered = 0;
+  const sentinel = element('li', '', 'ranking-sentinel');
+  sentinel.setAttribute('aria-hidden', 'true');
+  scrollEl.replaceChildren(sentinel);
+
+  function appendLocalBatch() {
+    const nextEnd = Math.min(feed.items.length, rendered + RANKINGS_BATCH);
+    if (nextEnd <= rendered) return false;
+    const frag = document.createDocumentFragment();
+    for (let i = rendered; i < nextEnd; i += 1) {
+      frag.append(renderRow(feed.items[i], i));
+    }
+    rendered = nextEnd;
+    scrollEl.insertBefore(frag, sentinel);
+    if (rendered >= feed.items.length && !feed.hasMore) sentinel.remove();
+    updateRankingFade(scrollEl, rendered < feed.items.length || feed.hasMore);
+    return true;
+  }
+
+  async function ensureMore() {
+    if (!scrollEl.isConnected || feed.epoch !== rankingsEpoch) return;
+    if (appendLocalBatch()) return;
+    if (!feed.hasMore || feed.loading) return;
+    feed.loading = true;
+    const requestEpoch = feed.epoch;
+    const offset = feed.items.length;
+    try {
+      const response = await fetch(
+        'api/rankings?mode=' + encodeURIComponent(key) + '&offset=' + offset + '&limit=' + RANKINGS_BATCH,
+        { cache: 'no-store' }
+      );
+      if (!response.ok) throw new Error('rankings_fetch_failed');
+      const page = await response.json();
+      if (requestEpoch !== rankingsEpoch || !scrollEl.isConnected) return;
+      const incoming = Array.isArray(page.items) ? page.items : [];
+      if (offset === feed.items.length && incoming.length) {
+        feed.items.push(...incoming);
+      }
+      if (Number.isSafeInteger(page.total)) feed.total = Math.max(page.total, feed.items.length);
+      feed.hasMore = Boolean(page.has_more) && incoming.length > 0 && feed.items.length < feed.total;
+      appendLocalBatch();
+      if (!feed.hasMore && rendered >= feed.items.length) sentinel.remove();
+      updateRankingFade(scrollEl, rendered < feed.items.length || feed.hasMore);
+    } catch {
+      feed.hasMore = false;
+      if (rendered >= feed.items.length) sentinel.remove();
+      updateRankingFade(scrollEl, false);
+    } finally {
+      feed.loading = false;
+    }
+  }
+
+  appendLocalBatch();
+  const onScroll = () => {
+    updateRankingFade(scrollEl, rendered < feed.items.length || feed.hasMore);
+    if (scrollEl.scrollHeight - scrollEl.clientHeight - scrollEl.scrollTop < 180) {
+      ensureMore();
+    }
+  };
+  scrollEl._onRankingScroll = onScroll;
+  scrollEl.addEventListener('scroll', onScroll, { passive: true });
+  if ('IntersectionObserver' in window && sentinel.isConnected) {
+    rankingObserver = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) ensureMore();
+    }, { root: scrollEl, rootMargin: '180px 0px' });
+    rankingObserver.observe(sentinel);
+  }
+  requestAnimationFrame(() => updateRankingFade(scrollEl, rendered < feed.items.length || feed.hasMore));
+}
+
+function renderAgentColumns(container) {
   const labels = lang === 'zh'
     ? {providers: '模型厂商', models: '具体模型', harnesses: 'Harness 工具'}
     : {providers: 'Model providers', models: 'Models', harnesses: 'Harness tools'};
@@ -691,9 +832,6 @@ function renderAgentColumns(container, limit = Infinity) {
   modes.setAttribute('role', 'group');
   modes.setAttribute('aria-label', lang === 'zh' ? '榜单分类' : 'Leaderboard categories');
   controls.append(modes);
-  const list = element('ol', undefined, 'ranking-list');
-  const dimension = agentDimension;
-  const rows = agentRankingsData?.[dimension] || [];
   for (const [key, label] of Object.entries(labels)) {
     const button = element('button', label);
     button.type = 'button';
@@ -706,83 +844,38 @@ function renderAgentColumns(container, limit = Infinity) {
     };
     modes.append(button);
   }
+  const list = element('ol', undefined, 'ranking-list ranking-scroll');
   list.setAttribute('aria-label', labels[agentDimension]);
-  container.replaceChildren(controls);
-  if (dimension === 'models') {
-    const filter = element('select');
-    filter.setAttribute('aria-label', lang === 'zh' ? '选择模型' : 'Select model');
-    filter.append(new Option(lang === 'zh' ? '全部模型' : 'All models', ''));
-    for (const row of rows) filter.append(new Option(agentName(row.name), row.name));
-    filter.value = rows.some(row => row.name === selectedModel) ? selectedModel : '';
-    filter.onchange = () => {
-      selectedModel = filter.value;
-      renderRankingMode();
-      container.querySelector('select')?.focus();
-    };
-    controls.append(filter);
-  }
-  const index = dimension === 'models' && selectedModel
-    ? rows.findIndex(row => row.name === selectedModel) : -1;
-  if (index >= 0) list.append(renderAgentRankingRow(rows[index], index));
-  else fillRankings(list, dimension === 'harnesses' ? rows : rows.slice(0, limit), 'agents');
-  if (agentDimension === 'providers') {
-    rows.slice(0, limit).forEach((provider, i) => {
-      const item = list.children[i];
-      if (provider.name === 'unknown') {
-        item.querySelector('.agent-brand-name span:last-child').textContent =
-          lang === 'zh' ? '未识别厂商' : 'Unidentified provider';
-      }
-      const details = element('details', undefined, 'provider-models');
-      const models = element('ol', undefined, 'ranking-list');
-      fillRankings(models, provider.models, 'agents');
-      details.append(element('summary', lang === 'zh' ? '查看旗下模型' : 'Show contributing models'), models);
-      item.append(details);
-    });
-  }
-  container.append(list);
-}
-
-function renderFullRankings() {
-  const agents = rankingMode === 'agents';
-  const columns = document.getElementById('agent-rankings-full');
-  columns.hidden = !agents;
-  rankingsFullList.hidden = agents;
-  if (agents) renderAgentColumns(columns);
-  else fillRankings(rankingsFullList, rankingsData.all_time, 'all_time');
-}
-
-function fillRankings(list, data, mode) {
-  const empty = mode === 'agents'
-    ? (agentRankingsData ? (lang === 'zh' ? '暂无通过验证的记录。' : 'No verified contributions yet.') : strings.rankingsUnavailable)
-    : mode === 'hour' ? strings.noHourContributors : strings.noContributors;
-  list.replaceChildren(...(data.length
-    ? data.map((entry, index) => mode === 'agents' ? renderAgentRankingRow(entry, index) : renderRankingRow(entry, index, mode))
-    : [element('li', empty, 'ranking-empty')]));
+  container.replaceChildren(controls, list);
+  const empty = agentRankingsData
+    ? (lang === 'zh' ? '暂无通过验证的记录。' : 'No verified contributions yet.')
+    : strings.rankingsUnavailable;
+  const isProvider = agentDimension === 'providers';
+  mountProgressiveRankings(list, agentDimension, (entry, index) => renderAgentRankingRow(entry, index, isProvider), empty);
 }
 
 function renderRankingMode() {
   if (!rankingsData) return;
   const agents = rankingMode === 'agents';
-  const rows = agents ? (agentRankingsData?.[agentDimension] || []) : rankingsData[rankingMode];
   const columns = document.getElementById('agent-ranking-columns');
   columns.hidden = !agents;
   rankingsList.hidden = agents;
-  if (agents) renderAgentColumns(columns, 6);
   document.getElementById('agent-ranking-controls').hidden = !agents;
   document.querySelector('.ranking-candidate').hidden = agents;
-  rankingsAll.disabled = agents && !agentRankingsData;
-  rankingsAll.textContent = agents ? (lang === 'zh' ? '查看完整榜单 ↗' : 'See full leaderboard ↗') :
-    (lang === 'zh' ? '查看全部贡献者 ↗' : 'See all contributors ↗');
-  document.getElementById('rankings-dialog-title').textContent = agents
-    ? (lang === 'zh' ? '厂商、模型与 Harness 贡献榜' : 'Provider, model and harness contributions')
-    : (lang === 'zh' ? '全部已核验贡献者' : 'All verified contributors');
   document.getElementById('rankings-summary').textContent = agents
     ? (lang === 'zh' ? '按本研究台累计首次核验积分排列。旧规则下首次通过的题每道计 1 分。' : 'Ranked by points from first accepted proofs on this research desk. Each first acceptance under the old rules counts for one point.')
     : strings.rankingsSummary(rankingsData.contributors.toLocaleString(locale), rankingsData.proofs.toLocaleString(locale));
-  fillRankings(rankingsList, rows.slice(0, 6), rankingMode);
-  document.getElementById('ranking-next-place').textContent = String(rows.length + 1);
-  rankingsAnnouncement.textContent = agents ? (lang === 'zh' ? '共 ' + rows.length + ' 项。' : rows.length + ' entries.') : strings.rankingsCount(rows.length);
-  if (rankingsDialog.open) renderFullRankings();
+  if (agents) {
+    renderAgentColumns(columns);
+    const total = rankingFeeds[agentDimension]?.total ?? 0;
+    rankingsAnnouncement.textContent = lang === 'zh' ? '共 ' + total + ' 项。' : total + ' entries.';
+  } else {
+    const empty = rankingMode === 'hour' ? strings.noHourContributors : strings.noContributors;
+    mountProgressiveRankings(rankingsList, rankingMode, (entry, index) => renderRankingRow(entry, index, rankingMode), empty);
+    const total = rankingFeeds[rankingMode]?.total ?? 0;
+    document.getElementById('ranking-next-place').textContent = String(total + 1);
+    rankingsAnnouncement.textContent = strings.rankingsCount(total);
+  }
 }
 
 function selectRankingMode(mode) {
@@ -804,21 +897,16 @@ function renderRankings(rankings, agentRankings) {
   rankingsData = rankings;
   agentRankingsData = agentRankings || null;
   rankingsSnapshot = snapshot;
-  rankingsAll.disabled = false;
+  seedRankingFeeds(rankings, agentRankings);
   document.getElementById('rankings-summary').textContent = strings.rankingsSummary(
     rankings.contributors.toLocaleString(locale), rankings.proofs.toLocaleString(locale)
   );
   selectRankingMode(rankingMode ?? (rankings.hour.length ? 'hour' : 'all_time'));
-
 }
 
 for (const button of rankingsModes) {
   button.addEventListener('click', () => selectRankingMode(button.dataset.rankingMode));
 }
-rankingsAll.addEventListener('click', () => {
-  renderFullRankings();
-  rankingsDialog.showModal();
-});
 
 function showDeskNotice(message) {
   if (deskNotice.textContent !== message) deskNotice.textContent = message;

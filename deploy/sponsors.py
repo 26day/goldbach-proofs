@@ -142,18 +142,22 @@ def coinitiator_lockup(path, lang, prefix):
         except sqlite3.Error:
             pass
     co_name = "知乎科学" if zh else "Zhihu Science"
+    initiator_role = "发起人" if zh else "Initiator"
+    co_role = "联合发起" if zh else "Co-initiator"
     co_content = (
         f'<img class="coinitiator-logo" src="{prefix}sponsors/logo/{logo_id}.png" alt="{co_name}" loading="eager">'
         if logo_id is not None else f'<strong>{co_name}</strong>'
     )
     return (
         f'<div class="colophon-credits">'
+        f'<span class="colophon-party"><span class="colophon-role">{initiator_role}</span>'
         f'<a class="colophon-person" href="{INITIATOR_URL}" target="_blank" rel="noopener noreferrer">'
         f'<span class="author-avatar" aria-hidden="true">L<img src="{escape(avatar_url)}" alt="" loading="eager" referrerpolicy="no-referrer"></span>'
-        f'<strong>@lifesize</strong></a>'
+        f'<strong>@lifesize</strong></a></span>'
         f'<span class="colophon-x" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M2.5 2.5l9 9M11.5 2.5l-9 9"/></svg></span>'
+        f'<span class="colophon-party"><span class="colophon-role">{co_role}</span>'
         f'<a class="colophon-org" href="{escape(co_url)}" target="_blank" rel="noopener noreferrer ugc nofollow">'
-        f'{co_content}</a>'
+        f'{co_content}</a></span>'
         f'</div>'
     )
 

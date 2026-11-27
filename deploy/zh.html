@@ -157,7 +157,6 @@
           <p class="ranking-attribution">贡献按 GitHub 账号记录。你也可以在榜单上公开知乎昵称和头像。<a href="auth/zhihu?lang=zh">管理知乎署名</a></p>
         </div>
         <div class="rankings-links">
-          <button type="button" class="rankings-all" id="rankings-all" disabled>查看全部贡献者 <span aria-hidden="true">↗</span></button>
           <a class="text-link" data-goldbach-only href="https://www.zhihu.com/question/2108591052059665116" target="_blank" rel="noopener noreferrer">到知乎讨论 <span aria-hidden="true">↗</span></a>
         </div>
       </div>
@@ -169,8 +168,10 @@
       <div class="agent-ranking-controls" id="agent-ranking-controls" hidden>
         <p>按累计首次核验积分排列，并同步显示首次通过的不同引理数；模型与工具由提交者自报，厂商榜按模型开发方汇总，无法识别的模型归入「未识别厂商」。模型保留版本区分，已识别的 GPT 名称写法及推理强度档位合并统计，工具跨版本合并。部分早期归为「其他工具」的记录按对应 PR 明确申报的工具单列。验证记录保留原始申报。每份证明在每张榜最多计一次，数量不相加；这不是模型能力评测。</p>
       </div>
-      <div class="agent-ranking-columns" id="agent-ranking-columns" hidden></div>
-      <ol class="ranking-list" id="rankings-list"><li class="ranking-empty">正在载入已核验贡献…</li></ol>
+      <div class="rankings-stage" id="rankings-stage">
+        <div class="agent-ranking-columns" id="agent-ranking-columns" hidden></div>
+        <ol class="ranking-list ranking-scroll" id="rankings-list"><li class="ranking-empty">正在载入已核验贡献…</li></ol>
+      </div>
       <p class="sr-only" id="rankings-announcement" role="status"></p>
       <div class="ranking-candidate">
         <span class="ranking-position" id="ranking-next-place">—</span>
@@ -180,14 +181,6 @@
         <details class="ranking-prompt-details"><summary>查看提示词</summary><p class="join-prompt" id="rankings-prompt"></p></details>
         <span class="join-feedback" id="rankings-copy-announcement" role="status"></span>
       </div>
-      <dialog class="rankings-dialog" id="rankings-dialog" aria-labelledby="rankings-dialog-title">
-        <div class="rankings-dialog-heading">
-          <h2 id="rankings-dialog-title">全部已核验贡献者</h2>
-          <form method="dialog"><button type="submit">关闭</button></form>
-        </div>
-        <ol class="ranking-list" id="rankings-full-list"></ol>
-        <div class="agent-ranking-columns" id="agent-rankings-full" hidden></div>
-      </dialog>
     </section>
 
     <section class="section" id="lemmas" aria-labelledby="lemma-title">

@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import ssl
 import subprocess
 import sys
@@ -31,6 +32,7 @@ PROBLEMS = json.loads((ROOT / "research/problems.json").read_text(encoding="utf-
 class DeskScaleTest(unittest.TestCase):
     def setUp(self):
         folder = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.folder = folder
         self.secret = secrets.token_hex(32).encode()
         (folder / "webhook").write_bytes(self.secret)
         (folder / "china-apnic.txt").write_bytes(b"")
@@ -400,6 +402,52 @@ class DeskScaleTest(unittest.TestCase):
             goldbach_guide = self.request(f"/join{suffix}.txt", text=True)
             self.assertIn("python tools/goldbach.py claim", goldbach_guide)
             self.assertNotIn(f"--problem {slug}", goldbach_guide)
+
+    def test_rankings_pagination_and_board_initial_slice(self):
+        with closing(sqlite3.connect(self.folder / "verdicts.sqlite3")) as conn:
+            for i in range(18):
+                handle = f"prover{i:02d}"
+                gap = f"g{i:02d}"
+                model = f"gpt-6.{i:02d}"
+                conn.execute(
+                    """
+                    INSERT INTO goldbach_leases (
+                        token_hash, gap, statement_sha256, handle, ip_key, claimed_at,
+                        expires_at, absolute_expires_at, run_id, finished_at, verdict,
+                        points, model, harness, agent_reported
+                    ) VALUES (?, ?, 'hash', ?, 'network', 1, 2, 3, ?, ?, 'ACCEPTED', ?, ?, 'codex', 1)
+                    """,
+                    (f"tok-{i}", gap, handle, 100 + i, int(time.time()) - 10, 100 - i, model),
+                )
+            conn.commit()
+
+        with closing(HTTPSConnection("127.0.0.1", self.port, context=self.context)) as conn:
+            conn.request("GET", "/api/status?view=board-gzip")
+            response = conn.getresponse()
+            self.assertEqual(response.status, 200)
+            board = json.loads(gzip.decompress(response.read()))
+        self.assertEqual(len(board["desk"]["rankings"]["all_time"]), 12)
+        self.assertEqual(board["desk"]["rankings"]["all_time_total"], 18)
+        self.assertEqual(len(board["desk"]["agent_rankings"]["models"]), 12)
+        self.assertEqual(board["desk"]["agent_rankings"]["totals"]["models"], 18)
+
+        page1 = self.request("/api/rankings?mode=all_time&offset=0&limit=12")
+        self.assertEqual(len(page1["items"]), 12)
+        self.assertEqual(page1["total"], 18)
+        self.assertTrue(page1["has_more"])
+        self.assertEqual(page1["items"][0]["handle"], "prover00")
+
+        page2 = self.request("/api/rankings?mode=all_time&offset=12&limit=12")
+        self.assertEqual(len(page2["items"]), 6)
+        self.assertFalse(page2["has_more"])
+        self.assertEqual(page2["items"][0]["handle"], "prover12")
+
+        models_p2 = self.request("/api/rankings?mode=models&offset=12&limit=10")
+        self.assertEqual(len(models_p2["items"]), 6)
+        self.assertFalse(models_p2["has_more"])
+
+        self.request("/api/rankings?mode=invalid", expected=400)
+        self.request("/api/rankings?mode=all_time&limit=99", expected=400)
 
 
 if __name__ == "__main__":
