@@ -289,6 +289,50 @@ def site_dock(lang, prefix, *, inline=False):
     )
 
 
+RANKINGS_PAGE_SIZE = 12
+RANKINGS_SNAPSHOTS = {}
+
+
+def attach_zhihu_profiles(rows):
+    if not rows:
+        return rows
+    profiles = ZHIHU.public_profiles(sorted({row["handle"].lower() for row in rows}))
+    enriched = []
+    for row in rows:
+        profile = profiles.get(row["handle"].lower())
+        enriched.append({**row, "zhihu": profile} if profile else dict(row))
+    return enriched
+
+
+def rankings_snapshot(desk):
+    cached = RANKINGS_SNAPSHOTS.get(desk)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    desk_status = desk.public_status()
+    data = (desk_status["rankings"], desk_status["agent_rankings"])
+    RANKINGS_SNAPSHOTS[desk] = (time.monotonic() + 10, data)
+    return data
+
+
+def rankings_page(desk, mode, offset, limit):
+    rankings, agent_rankings = rankings_snapshot(desk)
+    if mode in ("all_time", "hour"):
+        source = rankings[mode]
+        items = attach_zhihu_profiles(source[offset : offset + limit])
+    else:
+        source = agent_rankings.get(mode, [])
+        items = source[offset : offset + limit]
+    total = len(source)
+    return {
+        "mode": mode,
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "has_more": offset + len(items) < total,
+        "items": items,
+    }
+
+
 def research_status(desk=DESK, *, compact=False, board=False):
     db = desk.db_path
     results = []
@@ -350,12 +394,37 @@ def research_status(desk=DESK, *, compact=False, board=False):
     accepted = sum(gap["proved"] for gap in gaps)
     desk_status = desk.public_status()
     rankings = desk_status["rankings"]
-    rows = rankings["all_time"] + rankings["hour"]
-    profiles = ZHIHU.public_profiles(sorted({row["handle"].lower() for row in rows}))
-    for row in rows:
-        profile = profiles.get(row["handle"].lower())
-        if profile:
-            row["zhihu"] = profile
+    agent_rankings = desk_status["agent_rankings"]
+    RANKINGS_SNAPSHOTS[desk] = (time.monotonic() + 10, (rankings, agent_rankings))
+    if board:
+        all_time_rows = attach_zhihu_profiles(rankings["all_time"][:RANKINGS_PAGE_SIZE])
+        hour_rows = attach_zhihu_profiles(rankings["hour"][:RANKINGS_PAGE_SIZE])
+        desk_status = {
+            **desk_status,
+            "rankings": {
+                **rankings,
+                "all_time": all_time_rows,
+                "hour": hour_rows,
+                "all_time_total": len(rankings["all_time"]),
+                "hour_total": len(rankings["hour"]),
+            },
+            "agent_rankings": {
+                "providers": agent_rankings["providers"][:RANKINGS_PAGE_SIZE],
+                "models": agent_rankings["models"][:RANKINGS_PAGE_SIZE],
+                "harnesses": agent_rankings["harnesses"][:RANKINGS_PAGE_SIZE],
+                "totals": {
+                    key: len(agent_rankings[key])
+                    for key in ("providers", "models", "harnesses")
+                },
+            },
+        }
+    else:
+        rows = rankings["all_time"] + rankings["hour"]
+        profiles = ZHIHU.public_profiles(sorted({row["handle"].lower() for row in rows}))
+        for row in rows:
+            profile = profiles.get(row["handle"].lower())
+            if profile:
+                row["zhihu"] = profile
     return {
         **extra,
         "catalogue_revision": RELEASE_SHA,
@@ -1030,6 +1099,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, body)
             except sqlite3.Error:
                 return self.reply(503, b'{"error":"records unavailable"}')
+        if path == "/api/rankings":
+            query = parse_qs(url.query, keep_blank_values=True)
+            if not set(query) <= {"mode", "offset", "limit"}:
+                return self.reply(400, b'{"error":"invalid rankings query"}')
+            mode_param = query.get("mode", ["all_time"])
+            offset_param = query.get("offset", ["0"])
+            limit_param = query.get("limit", [str(RANKINGS_PAGE_SIZE)])
+            if (len(mode_param) != 1 or mode_param[0] not in {"all_time", "hour", "providers", "models", "harnesses"}
+                    or len(offset_param) != 1 or not re.fullmatch(r"[0-9]{1,5}", offset_param[0])
+                    or len(limit_param) != 1 or not re.fullmatch(r"[1-9][0-9]{0,2}", limit_param[0])):
+                return self.reply(400, b'{"error":"invalid rankings query"}')
+            limit = int(limit_param[0])
+            if not 1 <= limit <= 50:
+                return self.reply(400, b'{"error":"invalid rankings query"}')
+            try:
+                payload = rankings_page(desk, mode_param[0], int(offset_param[0]), limit)
+            except sqlite3.Error:
+                return self.reply(503, b'{"error":"rankings unavailable"}')
+            body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+            if accepts_gzip(self.headers.get("Accept-Encoding", "")):
+                return self.reply(200, gzip.compress(body, compresslevel=3), encoding="gzip")
+            return self.reply(200, body)
         if path == "/api/status":
             try:
                 view = parse_qs(url.query).get("view")
@@ -1109,6 +1200,8 @@ class Handler(BaseHTTPRequestHandler):
         page = page.replace("<!-- hero community -->", hero_community_card(lang, prefix), 1)
         page = page.replace("<!-- hero colophon -->",
                             sponsors.author_colophon(ZHIHU.db, lang, prefix, goldbach=(slug == "goldbach")), 1)
+        page = page.replace("<!-- hero origin -->",
+                            sponsors.hero_origin_note(lang, goldbach=(slug == "goldbach")), 1)
         page = page.replace("<!-- footer credit -->", sponsors.footer_credit(ZHIHU.db, lang, prefix), 1)
         if "<!-- site dock -->" in page:
             page = page.replace("<!-- site dock -->", site_dock(lang, prefix, inline=True), 1)
