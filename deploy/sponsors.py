@@ -171,14 +171,18 @@ def hero_origin_note(lang, *, goldbach=True):
         return ""
     if lang == "zh":
         return (
-            f'<p class="hero-origin">本项目由知乎答主 lifesize 在知乎 AI4S 讨论社群「知乎 研 Club」中发起。'
-            f'知乎科学持续支持研究者连接、公开讨论与阶段成果传播。'
+            '<div class="hero-origin">'
+            '<p>由 @lifesize 发起 · 知乎科学联合推动，知乎答主 lifesize 在知乎 AI4S 讨论社群「知乎 研 Club」中发起本次活动。</p>'
+            f'<p>知乎科学持续支持研究者连接、公开讨论与阶段成果传播。'
             f'<a href="{AI_WORKS_URL}" target="_blank" rel="noopener noreferrer">知乎 AI Works 入口 <span aria-hidden="true">↗</span></a></p>'
+            '</div>'
         )
     return (
-        f'<p class="hero-origin">Initiated by Zhihu creator lifesize in the Zhihu AI4S community “Zhihu Yan Club”. '
-        f'Zhihu Science supports connecting researchers, open discussion, and sharing milestones. '
+        '<div class="hero-origin">'
+        '<p>Initiated by @lifesize and co-promoted with Zhihu Science; Zhihu creator lifesize launched this effort in the Zhihu AI4S community “Zhihu Yan Club”.</p>'
+        f'<p>Zhihu Science supports connecting researchers, open discussion, and sharing milestones. '
         f'<a href="{AI_WORKS_URL}" target="_blank" rel="noopener noreferrer">Zhihu AI Works <span aria-hidden="true">↗</span></a></p>'
+        '</div>'
     )
 
 

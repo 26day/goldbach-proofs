@@ -680,6 +680,8 @@ button, a, input, select { -webkit-tap-highlight-color: transparent; }
   font-size: .84rem;
   line-height: 1.66;
 }
+.hero-origin p { margin: 0; }
+.hero-origin p + p { margin-top: .28rem; }
 .hero-origin a {
   color: var(--ink);
   font-weight: 560;
