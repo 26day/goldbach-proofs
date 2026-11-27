@@ -1992,7 +1992,7 @@ main > .sponsor-wall { width: 100%; }
   padding-block: clamp(1.6rem, 2.8vw, 3.25rem) clamp(1.25rem, 2vw, 2.25rem);
 }
 .hero-copy { align-self: center; }
-.hero-description { max-width: 38rem; }
+.hero-description, .hero-origin { max-width: 39rem; }
 .target-card { display: flex; flex-direction: column; justify-content: space-between; }
 .target-figure { flex: 1; }
 .target-terms { width: min(92%, 4.6em); font-size: clamp(2.75rem, 1.4rem + 3.4vw, 7.5rem); }
@@ -2141,6 +2141,7 @@ main > .sponsor-wall { width: 100%; }
   .research-map-v4 .grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); }
   .research-map-v4 .rm-board.horizontal .level { min-width: 240px; max-width: 380px; }
   .hero:lang(zh) h1 { font-size: clamp(4.4rem, 3.5vw, 5.2rem); }
+  .hero-description, .hero-origin { max-width: clamp(39rem, 30.2vw, 45rem); }
 }
 
 @media (min-width: 726px) and (max-width: 1279px) {
