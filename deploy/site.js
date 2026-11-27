@@ -695,6 +695,7 @@ function agentName(name) {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const XLINK_NS = 'http://www.w3.org/1999/xlink';
 const BRAND_ICON_KEY = /^[a-z0-9][a-z0-9-]{0,31}$/;
 let brandSpritePromise = null;
 
@@ -706,8 +707,9 @@ function ensureBrandSprite() {
     .then(markup => {
       if (!markup || document.getElementById('agent-brand-sprite')) return;
       const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
-      const svg = doc.documentElement;
-      if (!svg || svg.nodeName.toLowerCase() !== 'svg') return;
+      const parsed = doc.documentElement;
+      if (!parsed || parsed.localName !== 'svg' || doc.querySelector('parsererror')) return;
+      const svg = document.importNode(parsed, true);
       svg.id = 'agent-brand-sprite';
       svg.setAttribute('aria-hidden', 'true');
       svg.style.position = 'absolute';
@@ -736,6 +738,7 @@ function agentBrandIcon(entry, kind = 'models') {
     svg.setAttribute('aria-hidden', 'true');
     const use = document.createElementNS(SVG_NS, 'use');
     use.setAttribute('href', '#brand-' + key);
+    use.setAttributeNS(XLINK_NS, 'xlink:href', '#brand-' + key);
     svg.append(use);
     icon.append(svg);
   }
