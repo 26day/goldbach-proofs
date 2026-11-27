@@ -595,8 +595,13 @@ button, a, input, select { -webkit-tap-highlight-color: transparent; }
 }
 .footer a { white-space: nowrap; }
 .footer-links { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1.25rem; }
-.footer-credit-line { display: block; margin-top: .22rem; font-size: .78rem; color: var(--muted); }
-.footer-credit-line a { color: var(--ink); text-decoration: underline; text-underline-offset: .18em; }
+.footer-credit-line { display: block; margin-top: .38rem; }
+.footer-credit-line .colophon-credits { gap: .28rem .52rem; }
+.footer-credit-line .colophon-person,
+.footer-credit-line .colophon-org { font-size: .84rem; color: var(--ink); text-decoration: none; }
+.footer-credit-line .author-avatar { width: 1.35rem; height: 1.35rem; font-size: .68rem; }
+.footer-credit-line .colophon-x svg { width: 11px; height: 11px; }
+.footer-credit-line .coinitiator-logo { height: 1.62rem; max-width: 6.8rem; margin-inline-start: -.4rem; transform: translateY(1px); }
 .rankings-links, .heading-links { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; }
 .hero-colophon {
   margin-top: 1.05rem;
