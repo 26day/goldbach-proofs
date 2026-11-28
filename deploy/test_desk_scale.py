@@ -528,10 +528,83 @@ class DeskScaleTest(DeskServerTestCase):
             response = conn.getresponse()
             self.assertEqual(response.status, 200)
             self.assertEqual(response.headers.get("Content-Type"), "image/svg+xml")
+            self.assertEqual(response.headers.get("Cache-Control"), "public, max-age=300")
+            etag = response.headers.get("ETag")
+            self.assertTrue(etag)
             sprite_svg = gzip.decompress(response.read()).decode("utf-8")
             self.assertIn('id="brand-nex-agi"', sprite_svg)
             self.assertIn('id="brand-antigravity"', sprite_svg)
             self.assertIn('id="brand-tool-other"', sprite_svg)
+
+        with closing(HTTPSConnection("127.0.0.1", self.port, context=self.context)) as conn:
+            conn.request("GET", "/agent-icons.svg", headers={"Accept-Encoding": "gzip", "If-None-Match": etag})
+            response = conn.getresponse()
+            response.read()
+            self.assertEqual(response.status, 304)
+
+        page_html = self.request("/?lang=zh", text=True)
+        css_ver = hashlib.sha256((ROOT / "deploy/site.css").read_bytes()).hexdigest()[:8]
+        self.assertIn(f'href="site.css?v={css_ver}"', page_html)
+        with closing(HTTPSConnection("127.0.0.1", self.port, context=self.context)) as conn:
+            conn.request("GET", f"/site.css?v={css_ver}", headers={"Accept-Encoding": "gzip"})
+            response = conn.getresponse()
+            response.read()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get("Cache-Control"), "public, max-age=604800")
+            self.assertEqual(response.headers.get("Vary"), "Accept-Encoding")
+            self.assertTrue(response.headers.get("ETag"))
+
+        with closing(HTTPSConnection("127.0.0.1", self.port, context=self.context)) as conn:
+            conn.request("GET", "/api/rankings?mode=all_time&offset=0&limit=12", headers={"Accept-Encoding": "gzip"})
+            response = conn.getresponse()
+            response.read()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get("Cache-Control"), "public, max-age=10")
+            rankings_etag = response.headers.get("ETag")
+            self.assertTrue(rankings_etag)
+        with closing(HTTPSConnection("127.0.0.1", self.port, context=self.context)) as conn:
+            conn.request("GET", "/api/rankings?mode=all_time&offset=0&limit=12",
+                         headers={"Accept-Encoding": "gzip", "If-None-Match": rankings_etag})
+            response = conn.getresponse()
+            response.read()
+            self.assertEqual(response.status, 304)
+
+        # Seed one approved sponsor logo and verify WebP/PNG Accept negotiation + 304.
+        from PIL import Image
+        import io
+        buf = io.BytesIO()
+        Image.new("RGBA", (480, 240), (30, 120, 210, 255)).save(buf, format="PNG")
+        with closing(sqlite3.connect(self.folder / "contributor-links.sqlite3")) as conn:
+            conn.execute(
+                "INSERT INTO sponsor_logos(id, owner, name, png, state, submitted, website) VALUES (7, 'u1', 'Demo Org', ?, 'approved', 1, '')",
+                (buf.getvalue(),),
+            )
+            conn.commit()
+        with closing(HTTPSConnection("127.0.0.1", self.port, context=self.context)) as conn:
+            conn.request("GET", "/sponsors/logo/7.png", headers={"Accept": "image/avif,image/webp,image/*,*/*;q=0.8"})
+            response = conn.getresponse()
+            webp_body = response.read()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get("Content-Type"), "image/webp")
+            self.assertEqual(response.headers.get("Vary"), "Accept")
+            self.assertEqual(response.headers.get("Cache-Control"), "public, max-age=604800")
+            self.assertEqual(webp_body[:4], b"RIFF")
+            webp_etag = response.headers.get("ETag")
+        with closing(HTTPSConnection("127.0.0.1", self.port, context=self.context)) as conn:
+            conn.request("GET", "/sponsors/logo/7.png",
+                         headers={"Accept": "image/webp", "If-None-Match": webp_etag})
+            response = conn.getresponse()
+            response.read()
+            self.assertEqual(response.status, 304)
+        with closing(HTTPSConnection("127.0.0.1", self.port, context=self.context)) as conn:
+            conn.request("GET", "/sponsors/logo/7.png", headers={"Accept": "image/png"})
+            response = conn.getresponse()
+            png_body = response.read()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get("Content-Type"), "image/png")
+            self.assertEqual(response.headers.get("Vary"), "Accept")
+            self.assertTrue(png_body.startswith(b"\x89PNG"))
+            self.assertNotEqual(response.headers.get("ETag"), webp_etag)
 
 
 class RetiredStatusTest(DeskServerTestCase):

@@ -915,8 +915,7 @@ function mountProgressiveRankings(scrollEl, key, renderRow, emptyText) {
     const offset = feed.items.length;
     try {
       const response = await fetch(
-        'api/rankings?mode=' + encodeURIComponent(key) + '&offset=' + offset + '&limit=' + RANKINGS_BATCH,
-        { cache: 'no-store' }
+        'api/rankings?mode=' + encodeURIComponent(key) + '&offset=' + offset + '&limit=' + RANKINGS_BATCH
       );
       if (!response.ok) throw new Error('rankings_fetch_failed');
       const page = await response.json();
@@ -1516,6 +1515,8 @@ return {update,setProgram(value){field=value;if(initialized&&!currentTrack)rende
 })();
 
 let cachedRevision;
+let lastOverviewAt = 0;
+const OVERVIEW_MIN_INTERVAL = 30000;
 
 async function loadStatus() {
   if (loading || document.hidden) return;
@@ -1526,6 +1527,7 @@ async function loadStatus() {
     const response = await fetch('api/overview', {signal: request.signal});
     if (!response.ok) throw new Error('Status request failed');
     const data = await response.json();
+    lastOverviewAt = Date.now();
     const { counts, results, desk, lpf_record, catalogue_revision } = data;
     if (lastGaps !== null && cachedRevision !== catalogue_revision) {
       window.location.reload();
@@ -1953,10 +1955,30 @@ function initSponsorMarquee() {
   }
 }
 
+function scheduleSponsorMarquee() {
+  const wall = document.querySelector('.sponsor-wall');
+  if (!wall) return;
+  if (typeof IntersectionObserver !== 'function') {
+    initSponsorMarquee();
+    return;
+  }
+  const observer = new IntersectionObserver(entries => {
+    if (entries.some(entry => entry.isIntersecting)) {
+      observer.disconnect();
+      initSponsorMarquee();
+    }
+  }, {rootMargin: '350px 0px'});
+  observer.observe(wall);
+}
+
 for (const img of document.querySelectorAll('.author-avatar img')) {
   img.addEventListener('error', () => img.remove());
 }
-initSponsorMarquee();
+scheduleSponsorMarquee();
 loadStatus();
 window.setInterval(loadStatus, 120000);
-document.addEventListener('visibilitychange', loadStatus);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - lastOverviewAt >= OVERVIEW_MIN_INTERVAL) {
+    loadStatus();
+  }
+});

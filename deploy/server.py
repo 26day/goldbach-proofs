@@ -157,13 +157,26 @@ def asset_version(name):
     return hashlib.sha256(path.read_bytes()).hexdigest()[:8] if path.exists() else ""
 
 
-ASSET_VERSIONS = {name: asset_version(name) for name in ("site.css", "site.js", "agent-icons.svg")}
+ASSET_VERSIONS = {
+    name: asset_version(name)
+    for name in (
+        "site.css",
+        "site.js",
+        "agent-icons.svg",
+        "presence.js",
+        "discussion.js",
+        "goldbach-icon.svg",
+        "core-team-signup.png",
+        "discussion-qr.png",
+        "wechat.svg",
+    )
+}
 
 
 def version_assets(page, prefix=""):
     for name, version in ASSET_VERSIONS.items():
         if version:
-            page = page.replace(f'"{prefix}{name}"', f'"{prefix}{name}?v={version}"', 1)
+            page = page.replace(f'"{prefix}{name}"', f'"{prefix}{name}?v={version}"')
     return page
 
 
@@ -1138,7 +1151,9 @@ class Handler(BaseHTTPRequestHandler):
         if content_type == "application/json" or content_type.startswith("text/"):
             content_type += "; charset=utf-8"
         self.send_header("Content-Type", content_type)
-        if static or vary:
+        if isinstance(vary, str):
+            self.send_header("Vary", vary)
+        elif static or vary:
             self.send_header("Vary", "Accept-Encoding")
         if etag:
             self.send_header("ETag", etag)
@@ -1206,8 +1221,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply_presence()
         logo = re.fullmatch(r"/sponsors/logo/([1-9][0-9]{0,15})\.png", url.path)
         if logo:
-            image = sponsors.public_logo(ZHIHU.db, logo[1])
-            return self.public_conditional(image, "image/png", cache="public, max-age=3600") if image else self.reply(404, b'{}')
+            record = sponsors.public_logo_record(ZHIHU.db, logo[1])
+            if not record:
+                return self.reply(404, b'{}')
+            image, name = record
+            wants_webp = "image/webp" in self.headers.get("Accept", "").lower()
+            body, mime = sponsors.render_public_logo(image, webp=wants_webp, hd=(name == "知乎科学"))
+            return self.public_conditional(body, mime, cache="public, max-age=604800", vary="Accept")
         if url.path == ZHIHU_PATH or url.path.startswith(ZHIHU_PATH + "/"):
             return self.zhihu_request(url.path, url.query)
         twin_primes_path = f"/problems/{TWIN_PRIMES_SLUG}"
@@ -1223,10 +1243,11 @@ class Handler(BaseHTTPRequestHandler):
             lang = self.language(url)
             directory = directory_page(lang).replace("</main>", "</main>" + sponsors.wall(ZHIHU.db,lang,"../"), 1)
             directory = directory.replace('</a></div></header>', '</a>'+ZHIHU.account_link(self.headers,lang)+'</div></header>',1)
+            directory = version_assets(directory, "../")
             return self.reply(200, directory.encode(), "text/html", lang)
         if url.path == twin_primes_path + "/" and TWIN_PRIMES_SLUG not in PROBLEMS:
             lang = self.language(url)
-            return self.reply(200, twin_primes_page(lang).encode(), "text/html", lang)
+            return self.reply(200, version_assets(twin_primes_page(lang), "../../").encode(), "text/html", lang)
         desk, path, slug = self.scope(url.path)
         if desk is None:
             return self.reply(404, b'{}')
@@ -1456,10 +1477,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload = rankings_page(desk, mode_param[0], int(offset_param[0]), limit)
             except sqlite3.Error:
                 return self.reply(503, b'{"error":"rankings unavailable"}')
-            body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
-            if accepts_gzip(self.headers.get("Accept-Encoding", "")):
-                return self.reply(200, gzip.compress(body, compresslevel=3), encoding="gzip")
-            return self.reply(200, body)
+            return self.public_json(payload, cache="public, max-age=10")
         if path == "/api/status":
             return self.reply(410, b'{"error":"Status export retired","overview":"api/overview","tasks":"api/tasks","task":"api/task?lemma=ID","catalogue":"api/catalogue-status"}',
                               cache="public, max-age=300")
@@ -1534,12 +1552,19 @@ class Handler(BaseHTTPRequestHandler):
                 content = f"{title}\n\n{introduction}\n\n{instructions}".encode()
             mime = ASSETS[path]
             static = mime != "text/plain"
+            compressible = static and mime in {"text/css", "text/javascript", "image/svg+xml"}
             encoding = None
-            if static and mime in {"text/css", "text/javascript", "image/svg+xml"}:
-                encodings = self.headers.get("Accept-Encoding", "").lower().split(",")
-                if "gzip" in (token.strip() for token in encodings):
-                    content, encoding = compressed_asset(content), "gzip"
-            return self.reply(200, content, mime, encoding=encoding, static=static)
+            if compressible and accepts_gzip(self.headers.get("Accept-Encoding", "")):
+                content, encoding = compressed_asset(content), "gzip"
+            version = ASSET_VERSIONS.get(path[1:], "")
+            query_v = parse_qs(url.query).get("v", [""])[0]
+            if static and version and query_v == version:
+                cache = "public, max-age=604800"
+            elif static:
+                cache = "public, max-age=300"
+            else:
+                cache = "public, max-age=60"
+            return self.public_conditional(content, mime, encoding=encoding, cache=cache, vary=compressible)
         if path != "/":
             return self.reply(404, b'{}')
         lang = self.language(url)
@@ -1549,7 +1574,6 @@ class Handler(BaseHTTPRequestHandler):
         else:
             page = goldbach_roadmap_page(page, lang)
         prefix = "" if slug == "goldbach" else "../../"
-        page = version_assets(page, prefix)
         page = page.replace("<!-- account -->", ZHIHU.account_link(self.headers, lang), 1)
         page = page.replace("<!-- presence strip -->", presence_widget(lang, prefix, variant="inline"), 1)
         page = page.replace("<!-- hero community -->", hero_community_card(lang, prefix), 1)
@@ -1567,6 +1591,7 @@ class Handler(BaseHTTPRequestHandler):
             page = page.replace("<!-- sponsor wall -->", supporting, 1)
         else:
             page = page.replace("</main>", supporting + "</main>", 1)
+        page = version_assets(page, prefix)
         self.reply(200, page.encode(), "text/html", lang)
 
     do_HEAD = do_GET
